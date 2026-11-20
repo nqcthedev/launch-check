@@ -18,10 +18,11 @@ const IDENT = String.raw`(?:"[^"]+"|[A-Za-z_][\w$]*)`;
 const QUALIFIED = String.raw`(${IDENT}(?:\s*\.\s*${IDENT})?)`;
 
 function normalizeTable(raw: string): { schema: string; table: string; key: string } {
-  const parts = raw.split('.').map((p) => p.trim().replace(/^"|"$/g, ''));
+  // Unquoted identifiers fold to lower case in Postgres; quoted ones keep their case.
+  const norm = (s: string) => (s.startsWith('"') ? s.slice(1, -1) : s.toLowerCase());
+  const parts = raw.split('.').map((p) => p.trim());
   const table = parts.length > 1 ? parts[1]! : parts[0]!;
   const schema = parts.length > 1 ? parts[0]! : 'public';
-  const norm = (s: string) => (/^[a-z_][a-z0-9_$]*$/i.test(s) ? s.toLowerCase() : s);
   return { schema: norm(schema), table: norm(table), key: `${norm(schema)}.${norm(table)}` };
 }
 

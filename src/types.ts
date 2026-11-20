@@ -51,9 +51,11 @@ export interface Finding {
   fix: string;
   /** True when the rule is a heuristic that can produce false positives. */
   heuristic: boolean;
+  /** Link to an advisory or documentation, when the rule has one. */
+  docs?: string;
 }
 
-export type FindingInput = Omit<Finding, 'ruleId' | 'category' | 'why' | 'fix' | 'heuristic' | 'severity'> & {
+export type FindingInput = Omit<Finding, 'ruleId' | 'category' | 'why' | 'fix' | 'heuristic' | 'severity' | 'docs'> & {
   severity?: Severity;
   why?: string;
   fix?: string;

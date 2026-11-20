@@ -12,9 +12,12 @@ export interface MarkdownOptions {
 
 const esc = (s: string) => s.replace(/\|/g, '\\|');
 
+/** Escape HTML outside of `code spans` (inside them Markdown already renders text literally). */
 function inline(s: string): string {
-  // Messages already contain `code` spans; keep them, escape stray HTML.
-  return s.replace(/</g, '&lt;');
+  return s
+    .split(/(`[^`]*`)/)
+    .map((part) => (part.startsWith('`') && part.endsWith('`') && part.length > 1 ? part : part.replace(/</g, '&lt;')))
+    .join('');
 }
 
 function findingBlock(f: Finding, n: number): string {
@@ -36,6 +39,7 @@ function findingBlock(f: Finding, n: number): string {
   }
   parts.push(`**Why it matters:** ${inline(f.why)}`);
   parts.push(`**How to fix:** ${inline(f.fix)}`);
+  if (f.docs) parts.push(`**Reference:** ${f.docs}`);
   return parts.join('\n\n');
 }
 
@@ -99,7 +103,7 @@ export function renderMarkdown(result: AuditResult, opts: MarkdownOptions = {}):
       `using ${result.rulesRun.length} checks that apply to this stack.`,
   );
   out.push(
-    '- Checks marked **heuristic** infer intent from code patterns (for example "this handler has no auth check") and can produce false positives; each was meant to be confirmed by a person.',
+    '- Checks marked **heuristic** infer intent from code patterns (for example "this handler has no auth check") and can produce false positives; confirm them before acting.',
   );
   out.push('- Secrets are redacted in this report. Any key listed here should be treated as compromised and rotated.');
   out.push('- This is not a penetration test: business-logic flaws, infrastructure configuration and runtime behaviour are out of scope.');

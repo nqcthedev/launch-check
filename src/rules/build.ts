@@ -37,11 +37,11 @@ export function parseBuildOutput(output: string, root = ''): BuildError[] {
     const l = lines[i]!;
     let m: RegExpExecArray | null;
     // tsc: src/a.ts(12,5): error TS2322: msg   |   src/a.ts:12:5 - error TS2322: msg
-    if ((m = /^(.+?\.[cm]?[jt]sx?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.*)$/.exec(l))) {
+    if ((m = /^\s*([^\s'"()]+?\.[cm]?[jt]sx?)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.*)$/.exec(l))) {
       push({ file: norm(m[1]!), line: +m[2]!, column: +m[3]!, code: m[4]!, message: m[5]! });
       continue;
     }
-    if ((m = /^(.+?\.[cm]?[jt]sx?):(\d+):(\d+)\s+-\s+error\s+(TS\d+):\s+(.*)$/.exec(l))) {
+    if ((m = /^\s*([^\s'"]+?\.[cm]?[jt]sx?):(\d+):(\d+)\s+-\s+error\s+(TS\d+):\s+(.*)$/.exec(l))) {
       push({ file: norm(m[1]!), line: +m[2]!, column: +m[3]!, code: m[4]!, message: m[5]! });
       continue;
     }

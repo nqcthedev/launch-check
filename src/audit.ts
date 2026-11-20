@@ -3,6 +3,7 @@ import { basename, resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { createContext } from './context.js';
 import { allRules } from './rules/index.js';
+import { redactSecrets } from './rules/secrets.js';
 import { computeScore, gradeFor } from './score.js';
 import {
   SEVERITIES,
@@ -104,11 +105,14 @@ export async function audit(rootInput: string, options: AuditOptions = {}): Prom
           why: input.why ?? rule.why,
           fix: input.fix ?? rule.fix,
           heuristic: rule.heuristic ?? false,
+          ...(rule.docs ? { docs: rule.docs } : {}),
         };
         if (f.file && f.line && !f.snippet && !/(^|\/)\.env/.test(f.file)) {
           const text = ctx.read(f.file);
           if (text) f.snippet = snippetOf(new LineIndex(text).line(f.line));
         }
+        // Reports get shared: never let a raw secret into a snippet, whatever rule produced it.
+        if (f.snippet) f.snippet = redactSecrets(f.snippet);
         if (isSuppressed(ctx, f, indexCache)) {
           suppressed++;
           continue;

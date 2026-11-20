@@ -142,6 +142,13 @@ export function findGenericSecrets(text: string): SecretHit[] {
   return hits;
 }
 
+/** Redact every recognisable secret in a piece of text (used for all snippets in every report). */
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const hit of [...findProviderSecrets(text), ...findGenericSecrets(text)]) out = redactInLine(out, hit.value);
+  return out;
+}
+
 const SCAN_SKIP_RE = /(^|\/)(package\.json|tsconfig[\w.-]*\.json|jsconfig\.json|composer\.lock|.*\.lock)$/;
 
 export const hardcodedSecretRule = defineRule({
@@ -306,7 +313,7 @@ export const publicEnvSecretRule = defineRule({
         title: `${name} is shipped to the browser`,
         message:
           `${name} uses a public prefix, so its value is embedded in the client bundle` +
-          (info.valueKind ? ` (and the value is a ${info.valueKind})` : '') +
+          (info.valueKind ? ` (and the value is ${/^[AEIOU]/i.test(info.valueKind) ? 'an' : 'a'} ${info.valueKind})` : '') +
           `. Seen ${plural(info.uses, 'time')}.`,
         file: info.file,
         line: info.line,

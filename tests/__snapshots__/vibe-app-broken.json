@@ -1,0 +1,625 @@
+{
+  "tool": {
+    "name": "launch-check",
+    "version": "0.0.0-test"
+  },
+  "project": {
+    "name": "taskpilot",
+    "root": "<root>"
+  },
+  "generatedAt": "2026-01-15T09:00:00.000Z",
+  "detection": {
+    "frameworks": [
+      "nextjs-app"
+    ],
+    "integrations": [
+      "supabase",
+      "stripe",
+      "openai"
+    ],
+    "packageManager": null,
+    "lockfile": null,
+    "typescript": true,
+    "versions": {
+      "next": "14.1.0",
+      "react": "^18.2.0",
+      "react-dom": "latest"
+    },
+    "resolved": {},
+    "appDir": "app",
+    "pagesDir": null
+  },
+  "score": 13,
+  "grade": "F",
+  "counts": {
+    "critical": 8,
+    "high": 12,
+    "medium": 8,
+    "low": 9,
+    "info": 0
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "title": ".env with live secrets is not gitignored",
+      "message": ".env is not covered by .gitignore, so the next `git add .` commits it. It contains 3 secret-looking values: NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY.",
+      "file": ".env",
+      "line": 4,
+      "snippet": "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********",
+      "ruleId": "secrets/env-file-committed",
+      "category": "secrets",
+      "why": ".env files hold production credentials. If one is committed, every collaborator, CI log, fork and (for public repos) the whole internet gets your keys. AI builders often create .env and a .gitignore that only covers .env.local.",
+      "fix": "Add `.env*` (and `!.env.example`) to .gitignore, run `git rm --cached <file>`, rotate every secret that was in it, and keep only placeholder values in a committed .env.example.",
+      "heuristic": false
+    },
+    {
+      "severity": "critical",
+      "title": "Stripe live secret key hard-coded in source",
+      "message": "Found Stripe live secret key (sk_live_******…(49 chars)) in a file that is bundled into the browser JavaScript. Clerk secret keys share this prefix.",
+      "file": "lib/stripe.ts",
+      "line": 3,
+      "column": 68,
+      "snippet": "export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(49 chars)', {",
+      "ruleId": "secrets/hardcoded-key",
+      "category": "secrets",
+      "why": "Anything committed to the repository is readable by everyone with access to it, forever (git history keeps it even after deletion). Leaked API keys are scraped from public repos within minutes and used for fraud, data theft, or to run up your bill.",
+      "fix": "Rotate the key in the provider dashboard first (assume it is compromised), then move it to an environment variable that is only read on the server (Vercel/Netlify project settings, or a gitignored .env.local), and purge it from git history if the repo was ever public.",
+      "heuristic": false
+    },
+    {
+      "title": "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY is shipped to the browser",
+      "message": "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY uses a public prefix, so its value is embedded in the client bundle (and the value is a Supabase service_role key). Seen 2 times.",
+      "file": ".env",
+      "line": 4,
+      "snippet": "NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********",
+      "ruleId": "secrets/public-env-secret",
+      "category": "secrets",
+      "severity": "critical",
+      "why": "Variables prefixed NEXT_PUBLIC_, VITE_, REACT_APP_ or EXPO_PUBLIC_ are inlined into the JavaScript sent to every visitor at build time. Anyone can open DevTools and copy them. AI tools add the prefix to \"fix\" an undefined variable in a client component.",
+      "fix": "Remove the public prefix, read the variable only in server code (route handler, server action, edge function), and call that from the browser. Rotate the key: it has already been shipped to browsers.",
+      "heuristic": false
+    },
+    {
+      "title": "NEXT_PUBLIC_OPENAI_API_KEY is shipped to the browser",
+      "message": "NEXT_PUBLIC_OPENAI_API_KEY uses a public prefix, so its value is embedded in the client bundle (and the value is an OpenAI API key). Seen 2 times.",
+      "file": ".env",
+      "line": 5,
+      "snippet": "NEXT_PUBLIC_OPENAI_API_KEY=********",
+      "ruleId": "secrets/public-env-secret",
+      "category": "secrets",
+      "severity": "critical",
+      "why": "Variables prefixed NEXT_PUBLIC_, VITE_, REACT_APP_ or EXPO_PUBLIC_ are inlined into the JavaScript sent to every visitor at build time. Anyone can open DevTools and copy them. AI tools add the prefix to \"fix\" an undefined variable in a client component.",
+      "fix": "Remove the public prefix, read the variable only in server code (route handler, server action, edge function), and call that from the browser. Rotate the key: it has already been shipped to browsers.",
+      "heuristic": false
+    },
+    {
+      "title": "Table \"todos\" has Row Level Security disabled",
+      "message": "public.todos is created without `enable row level security` in any migration; the table is readable and writable with the public anon key.",
+      "file": "supabase/migrations/20240115120000_init.sql",
+      "line": 17,
+      "snippet": "create table public.todos (",
+      "ruleId": "supabase/rls-disabled",
+      "category": "supabase",
+      "severity": "critical",
+      "why": "Supabase exposes every table in the public schema through its REST API. The anon key ships in your frontend, so without RLS anyone can read, modify or delete every row with a single curl command. This is the most common breach in AI-built apps.",
+      "fix": "Add `alter table <name> enable row level security;` in a new migration, then write policies scoped to the owner, e.g. `create policy \"own rows\" on <name> for all using (auth.uid() = user_id) with check (auth.uid() = user_id);`.",
+      "heuristic": false
+    },
+    {
+      "title": "Supabase service_role key used in browser code",
+      "message": "lib/supabase.ts is part of the browser bundle (imported via app/dashboard/page.tsx) and reads NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY.",
+      "file": "lib/supabase.ts",
+      "line": 5,
+      "snippet": "const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!;",
+      "ruleId": "supabase/service-role-in-client",
+      "category": "supabase",
+      "severity": "critical",
+      "why": "The service_role key bypasses every RLS policy. Any module that reaches the browser bundle exposes it (or, if the env var is not public, the code is broken and someone will \"fix\" it by making it public). This is full admin access to your database.",
+      "fix": "Create the admin client in a server-only module (`import \"server-only\"` at the top of lib/supabase/admin.ts) and use it exclusively from route handlers / server actions after checking the user. In the browser use the anon key with RLS policies.",
+      "heuristic": false
+    },
+    {
+      "severity": "critical",
+      "title": "Webhook trusts unsigned requests",
+      "message": "app/api/webhooks/stripe/route.ts handles webhook events (Stripe payment events) but never verifies the provider signature.",
+      "file": "app/api/webhooks/stripe/route.ts",
+      "line": 4,
+      "snippet": "export async function POST(req: Request) {",
+      "ruleId": "security/unverified-webhook",
+      "category": "security",
+      "why": "Webhook URLs are public. If the handler trusts the request body without verifying the provider signature, anyone can POST a fake \"checkout.session.completed\" and unlock paid features or credit accounts for free.",
+      "fix": "Verify the signature with the raw body before parsing: for Stripe, `stripe.webhooks.constructEvent(await req.text(), req.headers.get(\"stripe-signature\"), process.env.STRIPE_WEBHOOK_SECRET)`. For other providers use their SDK verifier (svix, @octokit/webhooks) or an HMAC with timingSafeEqual.",
+      "heuristic": true
+    },
+    {
+      "severity": "critical",
+      "title": "next 14.1.0 allows bypassing middleware.ts",
+      "message": "next 14.1.0 is affected by CVE-2025-29927 (fixed in 14.2.25) and the project uses middleware.ts, which performs auth checks.",
+      "file": "package.json",
+      "line": 13,
+      "snippet": "\"next\": \"14.1.0\",",
+      "ruleId": "dependencies/next-middleware-bypass",
+      "category": "dependencies",
+      "why": "In affected Next.js versions an attacker can skip middleware entirely by sending an `x-middleware-subrequest` header. If middleware is where you check authentication, every \"protected\" page is public.",
+      "fix": "Upgrade Next.js to 12.3.5, 13.5.9, 14.2.25, 15.2.3 or later, and re-check auth inside pages/route handlers instead of relying on middleware alone.",
+      "heuristic": false,
+      "docs": "https://github.com/advisories/GHSA-f82v-jwr5-mffw"
+    },
+    {
+      "title": "STRIPE_SECRET_KEY read in client code",
+      "message": "lib/stripe.ts is bundled to the browser (imported via components/UpgradeButton.tsx), but reads STRIPE_SECRET_KEY, which is only available on the server.",
+      "file": "lib/stripe.ts",
+      "line": 3,
+      "snippet": "export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(49 chars)', {",
+      "ruleId": "secrets/server-env-in-client",
+      "category": "secrets",
+      "severity": "high",
+      "why": "Bundlers only expose public-prefixed variables to the browser, so a server secret read in a client component is `undefined` at runtime. The feature silently breaks, and the usual \"fix\" (adding NEXT_PUBLIC_/VITE_) leaks the secret to every visitor.",
+      "fix": "Move the code that needs the secret to the server (route handler, server action, Supabase edge function) and call it from the client with fetch or a server action.",
+      "heuristic": false
+    },
+    {
+      "severity": "high",
+      "title": "Policy \"Enable all access for all users\" lets anyone with your public anon key write \"notes\"",
+      "message": "Policy \"Enable all access for all users\" on public.notes (FOR ALL, TO public) uses `true`: anyone with your public anon key can read, insert, update and delete every row of notes.",
+      "file": "supabase/migrations/20240115120000_init.sql",
+      "line": 35,
+      "snippet": "create policy \"Enable all access for all users\"",
+      "ruleId": "supabase/permissive-policy",
+      "category": "supabase",
+      "why": "A policy with `using (true)` or `with check (true)` turns RLS back off for that operation: it is equivalent to no protection. AI tools generate these to make \"permission denied\" errors go away.",
+      "fix": "Scope the policy to the row owner, e.g. `using (auth.uid() = user_id)` and `with check (auth.uid() = user_id)`. Keep `true` only for SELECT on genuinely public data (e.g. published blog posts) and say so in a comment.",
+      "heuristic": false
+    },
+    {
+      "title": "CORS allows any origin together with credentials",
+      "message": "app/api/chat/route.ts allows any origin (`*`) and also sends Access-Control-Allow-Credentials: true.",
+      "file": "app/api/chat/route.ts",
+      "line": 5,
+      "snippet": "'Access-Control-Allow-Origin': '*',",
+      "ruleId": "security/cors-wildcard-credentials",
+      "category": "security",
+      "severity": "high",
+      "why": "Allowing every origin (`*`, or reflecting the request Origin) while also allowing credentials lets any website make authenticated requests on behalf of your logged-in users and read the responses.",
+      "fix": "Allow an explicit list of origins (`origin: [\"https://app.example.com\"]`) when credentials are needed, or drop credentials for public APIs.",
+      "heuristic": false
+    },
+    {
+      "title": "Unsanitized HTML passed to dangerouslySetInnerHTML",
+      "message": "dangerouslySetInnerHTML renders `note.content` without sanitization.",
+      "file": "app/dashboard/page.tsx",
+      "line": 59,
+      "snippet": "<div key={note.id} dangerouslySetInnerHTML={{ __html: note.content }} />",
+      "ruleId": "security/dangerously-set-inner-html",
+      "category": "security",
+      "severity": "high",
+      "why": "Rendering user-controlled or AI-generated HTML lets an attacker inject `<script>` tags or event handlers that run as your users (stored XSS): stealing sessions, Supabase tokens from localStorage, or acting on their behalf.",
+      "fix": "Render as text instead, or sanitize first: `dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}` (isomorphic-dompurify on the server). For Markdown use react-markdown without rehype-raw.",
+      "heuristic": false
+    },
+    {
+      "title": "eval() executes a string as code",
+      "message": "lib/ai-parse.ts:6 uses eval().",
+      "file": "lib/ai-parse.ts",
+      "line": 6,
+      "snippet": "return eval('(' + match[0] + ')');",
+      "ruleId": "security/eval",
+      "category": "security",
+      "severity": "high",
+      "why": "`eval`, `new Function` and string-based `setTimeout` execute arbitrary strings as code. If any part of that string comes from a user, a URL, or an LLM response, it is remote code execution (on the server) or XSS (in the browser).",
+      "fix": "Use `JSON.parse` for data (validate it with zod), a lookup table for dynamic dispatch, or a sandboxed expression parser (e.g. expr-eval) for formulas.",
+      "heuristic": false
+    },
+    {
+      "severity": "high",
+      "title": "Client bundle imports \"openai\"",
+      "message": "lib/openai.ts is browser code (imported via components/ChatAssistant.tsx) and imports \"openai\" (an LLM SDK; calling it from the browser means shipping your API key). The file also sets `dangerouslyAllowBrowser: true`.",
+      "file": "lib/openai.ts",
+      "line": 1,
+      "snippet": "import OpenAI from 'openai';",
+      "ruleId": "security/server-module-in-client",
+      "category": "security",
+      "why": "Everything a client component imports is bundled for the browser. Server SDKs either break the build, or \"work\" by shipping the credentials they need to every visitor (LLM SDKs with `dangerouslyAllowBrowser`, database clients, Stripe secret keys).",
+      "fix": "Keep server SDKs in modules that start with `import \"server-only\"` and expose what the UI needs through a route handler or server action. In the browser use the public SDKs (@stripe/stripe-js, Supabase anon client).",
+      "heuristic": false
+    },
+    {
+      "severity": "high",
+      "title": "Client bundle imports \"stripe\"",
+      "message": "lib/stripe.ts is browser code (imported via components/UpgradeButton.tsx) and imports \"stripe\" (the Stripe Node SDK, which needs your secret key; use @stripe/stripe-js in the browser).",
+      "file": "lib/stripe.ts",
+      "line": 1,
+      "snippet": "import Stripe from 'stripe';",
+      "ruleId": "security/server-module-in-client",
+      "category": "security",
+      "why": "Everything a client component imports is bundled for the browser. Server SDKs either break the build, or \"work\" by shipping the credentials they need to every visitor (LLM SDKs with `dangerouslyAllowBrowser`, database clients, Stripe secret keys).",
+      "fix": "Keep server SDKs in modules that start with `import \"server-only\"` and expose what the UI needs through a route handler or server action. In the browser use the public SDKs (@stripe/stripe-js, Supabase anon client).",
+      "heuristic": false
+    },
+    {
+      "severity": "high",
+      "title": "Route handler POST /api/chat has no auth check",
+      "message": "Route handler POST /api/chat calls `openai.chat` (a privileged or paid API) but no authentication or authorization check was found in the handler.",
+      "file": "app/api/chat/route.ts",
+      "line": 14,
+      "snippet": "export async function POST(req: Request) {",
+      "ruleId": "security/unauthenticated-route",
+      "category": "security",
+      "why": "Route handlers, API routes and server actions are public HTTP endpoints: anyone can call them with curl, regardless of what the UI shows. An endpoint that writes data or uses a privileged client (service role, Prisma, Stripe, OpenAI) without verifying the caller is an open door, and an open LLM endpoint can burn your API budget overnight.",
+      "fix": "At the top of the handler, resolve the user (e.g. `const { data: { user } } = await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then authorize the specific resource (does this user own row X?). Do not rely on middleware alone.",
+      "heuristic": true
+    },
+    {
+      "severity": "high",
+      "title": "Route handler DELETE /api/todos/[id] has no auth check",
+      "message": "Route handler DELETE /api/todos/[id] writes to the database but no authentication or authorization check was found in the handler.",
+      "file": "app/api/todos/[id]/route.ts",
+      "line": 5,
+      "snippet": "export async function DELETE(req: Request, { params }: { params: { id: string } }) {",
+      "ruleId": "security/unauthenticated-route",
+      "category": "security",
+      "why": "Route handlers, API routes and server actions are public HTTP endpoints: anyone can call them with curl, regardless of what the UI shows. An endpoint that writes data or uses a privileged client (service role, Prisma, Stripe, OpenAI) without verifying the caller is an open door, and an open LLM endpoint can burn your API budget overnight.",
+      "fix": "At the top of the handler, resolve the user (e.g. `const { data: { user } } = await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then authorize the specific resource (does this user own row X?). Do not rely on middleware alone.",
+      "heuristic": true
+    },
+    {
+      "severity": "high",
+      "title": "Server action updateProfile() has no auth check",
+      "message": "Server action updateProfile() writes to the database but no authentication or authorization check was found in the handler (server actions are callable by anyone who can load the page).",
+      "file": "app/dashboard/actions.ts",
+      "line": 5,
+      "snippet": "export async function updateProfile(formData: FormData) {",
+      "ruleId": "security/unauthenticated-route",
+      "category": "security",
+      "why": "Route handlers, API routes and server actions are public HTTP endpoints: anyone can call them with curl, regardless of what the UI shows. An endpoint that writes data or uses a privileged client (service role, Prisma, Stripe, OpenAI) without verifying the caller is an open door, and an open LLM endpoint can burn your API budget overnight.",
+      "fix": "At the top of the handler, resolve the user (e.g. `const { data: { user } } = await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then authorize the specific resource (does this user own row X?). Do not rely on middleware alone.",
+      "heuristic": true
+    },
+    {
+      "title": "TypeScript errors are ignored during `next build`",
+      "message": "next.config.js sets typescript.ignoreBuildErrors: true, so type errors never block a deploy.",
+      "file": "next.config.js",
+      "line": 8,
+      "snippet": "ignoreBuildErrors: true,",
+      "ruleId": "nextjs/build-checks-disabled",
+      "category": "nextjs",
+      "severity": "high",
+      "why": "`ignoreBuildErrors` lets a build with type errors deploy, so bugs the compiler already found reach production. AI tools switch it on to get a red build to go green.",
+      "fix": "Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the reported errors (run `npx tsc --noEmit`).",
+      "heuristic": false
+    },
+    {
+      "title": "react \"^18.2.0\" and react-dom \"latest\" do not match",
+      "message": "package.json declares react@\"^18.2.0\" but react-dom@\"latest\"; they can resolve to different versions.",
+      "file": "package.json",
+      "line": 16,
+      "snippet": "\"react-dom\": \"latest\",",
+      "ruleId": "dependencies/react-version-mismatch",
+      "category": "dependencies",
+      "severity": "high",
+      "why": "react and react-dom must be the exact same version; a mismatch or two copies of React in the bundle cause \"Invalid hook call\" crashes and hydration errors that only show up in production builds.",
+      "fix": "Install matching versions (`npm install react@X react-dom@X`), then `npm dedupe` and check `npm ls react`.",
+      "heuristic": false
+    },
+    {
+      "title": "No Content-Security-Policy header",
+      "message": "No Content-Security-Policy is set in the framework config, middleware, hosting config or HTML.",
+      "file": "next.config.js",
+      "ruleId": "security/missing-csp",
+      "category": "security",
+      "severity": "medium",
+      "why": "A Content-Security-Policy is the safety net when an XSS bug slips through: it stops injected scripts from loading or sending data to an attacker. Apps that render AI or user-generated content need it most.",
+      "fix": "Start with a report-only policy and tighten it: `Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; connect-src 'self' https://<project>.supabase.co; frame-ancestors 'none'`. For Next.js with inline scripts, use the nonce-based middleware pattern from the Next.js CSP guide.",
+      "heuristic": false
+    },
+    {
+      "severity": "medium",
+      "title": "5 of 5 recommended security headers missing",
+      "message": "No configuration sets: Strict-Transport-Security (forces HTTPS); X-Frame-Options / frame-ancestors (prevents clickjacking); X-Content-Type-Options (stops MIME sniffing); Referrer-Policy (limits URL leakage to third parties); Permissions-Policy (disables unused browser features).",
+      "file": "next.config.js",
+      "ruleId": "security/missing-security-headers",
+      "category": "security",
+      "why": "Baseline response headers block whole classes of attacks for free: clickjacking (your app framed on a phishing site), protocol downgrade, MIME sniffing. Security scanners and enterprise customers check for them first.",
+      "fix": "Add an `async headers()` block to next.config (or `headers` in vercel.json / `_headers` on Netlify / `helmet()` in Express) that sets Strict-Transport-Security, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy: strict-origin-when-cross-origin and Permissions-Policy.",
+      "heuristic": false
+    },
+    {
+      "title": "No lockfile",
+      "message": "package.json declares dependencies but no package-lock.json, pnpm-lock.yaml, yarn.lock or bun.lock is present.",
+      "file": "package.json",
+      "ruleId": "dependencies/missing-lockfile",
+      "category": "dependencies",
+      "severity": "medium",
+      "why": "Without a lockfile every install resolves fresh versions, so production can run different code than you tested, and a compromised or broken patch release ships automatically.",
+      "fix": "Run your package manager once (`npm install`, `pnpm install`) and commit the generated lockfile; use `npm ci` / `pnpm install --frozen-lockfile` in CI and deploys.",
+      "heuristic": false
+    },
+    {
+      "severity": "medium",
+      "title": "next 14.1.0 is 2 major versions behind",
+      "message": "next 14.1.0 is in use; the current major is 16.",
+      "file": "package.json",
+      "line": 13,
+      "snippet": "\"next\": \"14.1.0\",",
+      "ruleId": "dependencies/outdated-framework",
+      "category": "dependencies",
+      "why": "Old majors stop receiving security patches, and every month behind makes the eventual upgrade larger. Security fixes for Next.js land only on recent majors.",
+      "fix": "Upgrade one major at a time with the official codemods (`npx @next/codemod@latest upgrade`), running the build and tests between steps.",
+      "heuristic": false
+    },
+    {
+      "title": "1 dependency not pinned",
+      "message": "react-dom@\"latest\".",
+      "file": "package.json",
+      "line": 16,
+      "snippet": "\"react-dom\": \"latest\",",
+      "ruleId": "dependencies/unpinned-version",
+      "category": "dependencies",
+      "severity": "medium",
+      "why": "\"latest\", \"*\" and \">=\" ranges pull in new major versions with breaking changes on the next install, often in the middle of a deploy.",
+      "fix": "Pin to a caret range of the version you tested (`npm install next@15.5.4` writes \"^15.5.4\").",
+      "heuristic": false
+    },
+    {
+      "severity": "medium",
+      "title": "No .env.example",
+      "message": "The code reads 4 environment variables (NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY) but there is no .env.example documenting them.",
+      "file": "lib/openai.ts",
+      "line": 4,
+      "ruleId": "config/env-example",
+      "category": "config",
+      "why": "A deployment fails (or worse, runs with features silently disabled) when a variable the code needs is not set. .env.example is the checklist whoever deploys the app (you in six months, a client, Vercel) uses to configure it.",
+      "fix": "Create or update .env.example with every variable the code reads, using placeholder values, and commit it.",
+      "heuristic": false,
+      "snippet": "apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,"
+    },
+    {
+      "title": "tsconfig.json: \"strict\" is not enabled",
+      "message": "tsconfig.json: \"strict\" is not enabled.",
+      "file": "tsconfig.json",
+      "line": 7,
+      "snippet": "\"strict\": false,",
+      "ruleId": "config/typescript-strict",
+      "category": "config",
+      "severity": "medium",
+      "why": "Without `strict`, TypeScript lets `null`/`undefined` flow anywhere and silently types unknown values as `any`. Most \"Cannot read properties of undefined\" crashes in production are errors strict mode would have caught at build time.",
+      "fix": "Set `\"strict\": true` in tsconfig.json and fix the errors (`npx tsc --noEmit`). Enable it file-by-file with `// @ts-check` if the backlog is large.",
+      "heuristic": false
+    },
+    {
+      "severity": "medium",
+      "title": "8 explicit `any`s (30.4 per 1,000 lines)",
+      "message": "8 uses of `any` across 4 files; most in app/dashboard/page.tsx (4), components/ChatAssistant.tsx (2), app/dashboard/actions.ts (1).",
+      "file": "app/dashboard/actions.ts",
+      "line": 7,
+      "locations": [
+        {
+          "file": "app/dashboard/actions.ts",
+          "line": 7
+        },
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 10
+        },
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 11
+        },
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 48
+        },
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 58
+        },
+        {
+          "file": "components/ChatAssistant.tsx",
+          "line": 7
+        },
+        {
+          "file": "components/ChatAssistant.tsx",
+          "line": 9
+        },
+        {
+          "file": "lib/ai-parse.ts",
+          "line": 3
+        }
+      ],
+      "count": 8,
+      "ruleId": "code-quality/any-density",
+      "category": "code-quality",
+      "why": "Every `any` switches the type checker off for that value. A high density means TypeScript is mostly decorative and refactors break silently.",
+      "fix": "Replace `any` with real types or `unknown` + narrowing; generate database types (`supabase gen types typescript`, Prisma client) instead of `any` rows.",
+      "heuristic": false,
+      "snippet": "const updates: any = Object.fromEntries(formData.entries());"
+    },
+    {
+      "severity": "low",
+      "title": "ESLint is skipped during `next build`",
+      "message": "next.config.js sets eslint.ignoreDuringBuilds: true. Make sure lint runs in CI instead.",
+      "file": "next.config.js",
+      "line": 11,
+      "snippet": "ignoreDuringBuilds: true,",
+      "ruleId": "nextjs/build-checks-disabled",
+      "category": "nextjs",
+      "why": "`ignoreBuildErrors` lets a build with type errors deploy, so bugs the compiler already found reach production. AI tools switch it on to get a red build to go green.",
+      "fix": "Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the reported errors (run `npx tsc --noEmit`).",
+      "heuristic": false
+    },
+    {
+      "title": "next/image optimization is turned off",
+      "message": "next.config.js sets images.unoptimized: true for a server-rendered app.",
+      "file": "next.config.js",
+      "line": 4,
+      "snippet": "unoptimized: true,",
+      "ruleId": "nextjs/images-unoptimized",
+      "category": "nextjs",
+      "severity": "low",
+      "why": "`images.unoptimized: true` serves original, full-size images to every device: slower Largest Contentful Paint, worse SEO, higher bandwidth bills. It is often copied from static-export examples.",
+      "fix": "Remove `unoptimized: true` and configure `images.remotePatterns` for external hosts. Keep it only with `output: \"export\"`.",
+      "heuristic": false
+    },
+    {
+      "title": "App Router has no error.tsx",
+      "message": "No error.tsx or global-error.tsx under app/.",
+      "file": "app",
+      "ruleId": "nextjs/missing-error-boundary",
+      "category": "nextjs",
+      "severity": "low",
+      "why": "Without an error.tsx, an exception in any server or client component shows the bare Next.js crash screen (or a blank page) instead of a recoverable UI.",
+      "fix": "Add app/error.tsx (a \"use client\" component with a reset button) and app/global-error.tsx for errors in the root layout.",
+      "heuristic": false
+    },
+    {
+      "title": "App Router has no not-found.tsx",
+      "message": "No app/not-found.tsx.",
+      "file": "app",
+      "ruleId": "nextjs/missing-not-found",
+      "category": "nextjs",
+      "severity": "low",
+      "why": "The default 404 page has no navigation back into your app and no branding; broken links become dead ends.",
+      "fix": "Add app/not-found.tsx (App Router) or pages/404.tsx (Pages Router) with a link home.",
+      "heuristic": false
+    },
+    {
+      "title": "Root layout exports no metadata",
+      "message": "app/layout.tsx exports neither `metadata` nor `generateMetadata`.",
+      "file": "app/layout.tsx",
+      "ruleId": "seo/missing-metadata",
+      "category": "config",
+      "severity": "low",
+      "why": "Search results and link previews (Slack, X, WhatsApp) use the title and description. Without them, your app shows up as \"Create Next App\" or a bare URL.",
+      "fix": "Export `metadata` (title template, description, openGraph) from the root layout, or add `<title>` and `<meta name=\"description\">` to index.html.",
+      "heuristic": false
+    },
+    {
+      "title": "No robots.txt",
+      "message": "Neither public/robots.txt nor an app/robots route exists.",
+      "ruleId": "seo/missing-robots",
+      "category": "config",
+      "severity": "low",
+      "why": "Without robots.txt crawlers guess; you cannot keep /dashboard or /api out of search results or point crawlers to your sitemap.",
+      "fix": "Add app/robots.ts (Next.js) or public/robots.txt that disallows private paths and links the sitemap.",
+      "heuristic": false
+    },
+    {
+      "title": "No sitemap",
+      "message": "No sitemap.xml or app/sitemap route was found.",
+      "ruleId": "seo/missing-sitemap",
+      "category": "config",
+      "severity": "low",
+      "why": "A sitemap gets new pages indexed faster and is expected by Google Search Console.",
+      "fix": "Add app/sitemap.ts (Next.js) or generate public/sitemap.xml at build time (e.g. vite-plugin-sitemap, next-sitemap).",
+      "heuristic": false
+    },
+    {
+      "severity": "low",
+      "title": "3 console.log calls left in source",
+      "message": "3 debug logs in 2 files (3 in browser code); most in app/dashboard/page.tsx (2), components/ChatAssistant.tsx (1).",
+      "file": "app/dashboard/page.tsx",
+      "line": 21,
+      "locations": [
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 21
+        },
+        {
+          "file": "app/dashboard/page.tsx",
+          "line": 28
+        },
+        {
+          "file": "components/ChatAssistant.tsx",
+          "line": 20
+        }
+      ],
+      "count": 3,
+      "ruleId": "code-quality/console-log",
+      "category": "code-quality",
+      "why": "Debug logging in browser code leaks internal data (API responses, user objects, tokens) to anyone with DevTools open, and on the server it floods logs with unstructured noise that hides real errors.",
+      "fix": "Remove debug logs, or use a logger with levels (pino, consola) and strip `console.log` in production builds (`compiler.removeConsole` in next.config).",
+      "heuristic": false,
+      "snippet": "console.log('loaded data', todoData, noteData);"
+    },
+    {
+      "severity": "low",
+      "title": "2 TODO/FIXME markers, 2 security-related",
+      "message": "2 markers (0 FIXME/HACK/XXX). Security-related: app/api/todos/[id]/route.ts:4, app/dashboard/actions.ts:8.",
+      "file": "app/api/todos/[id]/route.ts",
+      "line": 4,
+      "snippet": "// TODO: add auth check before launch",
+      "locations": [
+        {
+          "file": "app/api/todos/[id]/route.ts",
+          "line": 4
+        },
+        {
+          "file": "app/dashboard/actions.ts",
+          "line": 8
+        },
+        {
+          "file": "app/api/todos/[id]/route.ts",
+          "line": 4
+        },
+        {
+          "file": "app/dashboard/actions.ts",
+          "line": 8
+        }
+      ],
+      "count": 2,
+      "ruleId": "code-quality/todo-comments",
+      "category": "code-quality",
+      "why": "AI-generated code often leaves \"TODO: add auth\" or \"FIXME: validate input\" where a real implementation is required. Each one is worth a look before launch.",
+      "fix": "Review each marker; implement or track it in your issue tracker, then delete it.",
+      "heuristic": false
+    }
+  ],
+  "rulesRun": [
+    "secrets/hardcoded-key",
+    "secrets/env-file-committed",
+    "secrets/public-env-secret",
+    "secrets/server-env-in-client",
+    "supabase/rls-disabled",
+    "supabase/permissive-policy",
+    "supabase/service-role-in-client",
+    "nextjs/build-checks-disabled",
+    "nextjs/images-unoptimized",
+    "nextjs/missing-error-boundary",
+    "nextjs/missing-not-found",
+    "security/server-module-in-client",
+    "security/dangerously-set-inner-html",
+    "security/unauthenticated-route",
+    "security/unverified-webhook",
+    "security/missing-security-headers",
+    "security/missing-csp",
+    "seo/missing-robots",
+    "seo/missing-sitemap",
+    "seo/missing-metadata",
+    "config/typescript-strict",
+    "code-quality/any-density",
+    "code-quality/console-log",
+    "code-quality/debugger",
+    "code-quality/todo-comments",
+    "security/eval",
+    "security/cors-wildcard-credentials",
+    "security/sql-injection",
+    "config/env-example",
+    "dependencies/missing-lockfile",
+    "dependencies/unpinned-version",
+    "dependencies/react-version-mismatch",
+    "dependencies/outdated-framework",
+    "dependencies/next-middleware-bypass"
+  ],
+  "suppressed": 0,
+  "errors": [],
+  "filesScanned": 19,
+  "durationMs": 0,
+  "config": {
+    "ignore": [],
+    "rules": {},
+    "failOn": "critical",
+    "consoleLogThreshold": 5,
+    "anyDensityThreshold": 5,
+    "configFile": null
+  }
+}

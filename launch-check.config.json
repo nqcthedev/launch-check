@@ -1,0 +1,4 @@
+{
+  "ignore": ["fixtures/", "tests/"],
+  "failOn": "high"
+}

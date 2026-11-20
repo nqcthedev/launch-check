@@ -144,7 +144,7 @@ export const missingMetadataRule = defineRule({
   category: 'config',
   severity: 'low',
   why: 'Search results and link previews (Slack, X, WhatsApp) use the title and description. Without them, your app shows up as "Create Next App" or a bare URL.',
-  fix: 'Export `metadata` (title template, description, openGraph) from the root layout, or add <title> and <meta name="description"> to index.html.',
+  fix: 'Export `metadata` (title template, description, openGraph) from the root layout, or add `<title>` and `<meta name="description">` to index.html.',
   appliesTo: isFrontend,
   run(ctx): FindingInput[] {
     if (isNext(ctx) && ctx.detection.appDir) {
@@ -165,8 +165,8 @@ export const missingMetadataRule = defineRule({
       const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim();
       const desc = /<meta\s+name=["']description["']/i.test(html);
       const missing: string[] = [];
-      if (!title || /^(Vite \+ React|Vite App|React App|Lovable App)$/i.test(title)) missing.push(title ? `placeholder title "${title}"` : '<title>');
-      if (!desc) missing.push('<meta name="description">');
+      if (!title || /^(Vite \+ React|Vite App|React App|Lovable App)$/i.test(title)) missing.push(title ? `placeholder title "${title}"` : '`<title>`');
+      if (!desc) missing.push('`<meta name="description">`');
       if (missing.length > 0) return [{ title: 'index.html metadata incomplete', message: `index.html is missing ${missing.join(' and ')}.`, file: 'index.html' }];
     }
     return [];

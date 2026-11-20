@@ -179,7 +179,7 @@ export const dangerousHtmlRule = defineRule({
   category: 'security',
   severity: 'high',
   why:
-    'Rendering user-controlled or AI-generated HTML lets an attacker inject <script> or event handlers that run as your users (stored XSS): ' +
+    'Rendering user-controlled or AI-generated HTML lets an attacker inject `<script>` tags or event handlers that run as your users (stored XSS): ' +
     'stealing sessions, Supabase tokens from localStorage, or acting on their behalf.',
   fix:
     'Render as text instead, or sanitize first: `dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}` (isomorphic-dompurify on the server). ' +
@@ -243,7 +243,7 @@ export function functionBody(structural: string, at: number): [number, number] {
 }
 
 export const AUTH_SIGNAL_RE =
-  /\b(auth\s*\(\s*\)|getServerSession|getSession|getUser|getClaims|currentUser|requireAuth|requireUser|requireAdmin|requireSession|requireRole|withAuth|withApiAuthRequired|isAuthenticated|ensureAuth|checkAuth|verifyToken|verifyJwt|verifyIdToken|jwtVerify|jwt\.verify|validateRequest|getToken|getAuth|clerkClient|getKindeServerSession|auth\.protect|authorize|unauthori[sz]ed|forbidden)\b|\b(?:401|403)\b|['"]authorization['"]|headers\.authorization|x-api-key|CRON_SECRET|API_SECRET|ADMIN_TOKEN/i;
+  /\bauth\s*\(\s*\)|\bauth\.protect\s*\(|\b(?:getServerSession|getSession|getUser|getClaims|currentUser|requireAuth|requireUser|requireAdmin|requireSession|requireRole|withAuth|withApiAuthRequired|isAuthenticated|ensureAuth|checkAuth|verifyToken|verifyJwt|verifyIdToken|jwtVerify|jwt\.verify|validateRequest|getToken|getAuth|clerkClient|getKindeServerSession|authorize|unauthori[sz]ed|forbidden)\b|\b(?:401|403)\b|['"]authorization['"]|headers\.authorization|x-api-key|CRON_SECRET|API_SECRET|ADMIN_TOKEN/i;
 
 const SIGNATURE_SIGNAL_RE =
   /\b(constructEvent(Async)?|webhooks\.verify|verifySignature|verifyWebhook|validateWebhook|Webhook\s*\(|svix|timingSafeEqual|createHmac|stripe-signature|x-hub-signature|x-signature|svix-signature|webhook-signature|CRON_SECRET)\b/i;

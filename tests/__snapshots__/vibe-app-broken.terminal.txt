@@ -1,0 +1,339 @@
+
+  launch-check v0.0.0-test · production-readiness audit
+
+  Project  taskpilot
+  Stack    Next.js 14.1.0 (App Router) · Supabase, Stripe, OpenAI
+  Scanned  19 files · 34 checks · 0.0s
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ Score  13/100   Grade F   Not ready for production                       │
+  │ ● 8 critical  ● 12 high  ● 8 medium  ● 9 low  ● 0 info                   │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  SECRETS & CREDENTIALS (5)
+
+   CRITICAL  .env with live secrets is not gitignored  secrets/env-file-committed
+             .env:4
+             │ NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********
+             .env is not covered by .gitignore, so the next `git add .` commits it. It contains 3
+             secret-looking values: NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY,
+             NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY.
+             Fix  Add `.env*` (and `!.env.example`) to .gitignore, run `git rm --cached <file>`,
+                  rotate every secret that was in it, and keep only placeholder values in a
+                  committed .env.example.
+
+   CRITICAL  Stripe live secret key hard-coded in source  secrets/hardcoded-key
+             lib/stripe.ts:3
+             │ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(…
+             Found Stripe live secret key (sk_live_******…(49 chars)) in a file that is bundled into
+             the browser JavaScript. Clerk secret keys share this prefix.
+             Fix  Rotate the key in the provider dashboard first (assume it is compromised), then
+                  move it to an environment variable that is only read on the server (Vercel/Netlify
+                  project settings, or a gitignored .env.local), and purge it from git history if
+                  the repo was ever public.
+
+   CRITICAL  NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY is shipped to the  secrets/public-env-secret
+             browser
+             .env:4
+             │ NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********
+             NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY uses a public prefix, so its value is embedded in
+             the client bundle (and the value is a Supabase service_role key). Seen 2 times.
+             Fix  Remove the public prefix, read the variable only in server code (route handler,
+                  server action, edge function), and call that from the browser. Rotate the key: it
+                  has already been shipped to browsers.
+
+   CRITICAL  NEXT_PUBLIC_OPENAI_API_KEY is shipped to the browser  secrets/public-env-secret
+             .env:5
+             │ NEXT_PUBLIC_OPENAI_API_KEY=********
+             NEXT_PUBLIC_OPENAI_API_KEY uses a public prefix, so its value is embedded in the client
+             bundle (and the value is an OpenAI API key). Seen 2 times.
+             Fix  Remove the public prefix, read the variable only in server code (route handler,
+                  server action, edge function), and call that from the browser. Rotate the key: it
+                  has already been shipped to browsers.
+
+   HIGH      STRIPE_SECRET_KEY read in client code  secrets/server-env-in-client
+             lib/stripe.ts:3
+             │ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(…
+             lib/stripe.ts is bundled to the browser (imported via components/UpgradeButton.tsx),
+             but reads STRIPE_SECRET_KEY, which is only available on the server.
+             Fix  Move the code that needs the secret to the server (route handler, server action,
+                  Supabase edge function) and call it from the client with fetch or a server action.
+
+  SUPABASE (3)
+
+   CRITICAL  Table "todos" has Row Level Security disabled  supabase/rls-disabled
+             supabase/migrations/20240115120000_init.sql:17
+             │ create table public.todos (
+             public.todos is created without `enable row level security` in any migration; the table
+             is readable and writable with the public anon key.
+             Fix  Add `alter table <name> enable row level security;` in a new migration, then write
+                  policies scoped to the owner, e.g. `create policy "own rows" on <name> for all
+                  using (auth.uid() = user_id) with check (auth.uid() = user_id);`.
+
+   CRITICAL  Supabase service_role key used in browser code  supabase/service-role-in-client
+             lib/supabase.ts:5
+             │ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!;
+             lib/supabase.ts is part of the browser bundle (imported via app/dashboard/page.tsx) and
+             reads NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY.
+             Fix  Create the admin client in a server-only module (`import "server-only"` at the top
+                  of lib/supabase/admin.ts) and use it exclusively from route handlers / server
+                  actions after checking the user. In the browser use the anon key with RLS
+                  policies.
+
+   HIGH      Policy "Enable all access for all users" lets anyone with  supabase/permissive-policy
+             your public anon key write "notes"
+             supabase/migrations/20240115120000_init.sql:35
+             │ create policy "Enable all access for all users"
+             Policy "Enable all access for all users" on public.notes (FOR ALL, TO public) uses
+             `true`: anyone with your public anon key can read, insert, update and delete every row
+             of notes.
+             Fix  Scope the policy to the row owner, e.g. `using (auth.uid() = user_id)` and `with
+                  check (auth.uid() = user_id)`. Keep `true` only for SELECT on genuinely public
+                  data (e.g. published blog posts) and say so in a comment.
+
+  APPLICATION SECURITY (11)
+
+   CRITICAL  Webhook trusts unsigned requests  security/unverified-webhook ~heuristic
+             app/api/webhooks/stripe/route.ts:4
+             │ export async function POST(req: Request) {
+             app/api/webhooks/stripe/route.ts handles webhook events (Stripe payment events) but
+             never verifies the provider signature.
+             Fix  Verify the signature with the raw body before parsing: for Stripe,
+                  `stripe.webhooks.constructEvent(await req.text(),
+                  req.headers.get("stripe-signature"), process.env.STRIPE_WEBHOOK_SECRET)`. For
+                  other providers use their SDK verifier (svix, @octokit/webhooks) or an HMAC with
+                  timingSafeEqual.
+
+   HIGH      CORS allows any origin together with credentials  security/cors-wildcard-credentials
+             app/api/chat/route.ts:5
+             │ 'Access-Control-Allow-Origin': '*',
+             app/api/chat/route.ts allows any origin (`*`) and also sends
+             Access-Control-Allow-Credentials: true.
+             Fix  Allow an explicit list of origins (`origin: ["https://app.example.com"]`) when
+                  credentials are needed, or drop credentials for public APIs.
+
+   HIGH      Unsanitized HTML passed to  security/dangerously-set-inner-html
+             dangerouslySetInnerHTML
+             app/dashboard/page.tsx:59
+             │ <div key={note.id} dangerouslySetInnerHTML={{ __html: note.content }} />
+             dangerouslySetInnerHTML renders `note.content` without sanitization.
+             Fix  Render as text instead, or sanitize first: `dangerouslySetInnerHTML={{ __html:
+                  DOMPurify.sanitize(html) }}` (isomorphic-dompurify on the server). For Markdown
+                  use react-markdown without rehype-raw.
+
+   HIGH      eval() executes a string as code  security/eval
+             lib/ai-parse.ts:6
+             │ return eval('(' + match[0] + ')');
+             lib/ai-parse.ts:6 uses eval().
+             Fix  Use `JSON.parse` for data (validate it with zod), a lookup table for dynamic
+                  dispatch, or a sandboxed expression parser (e.g. expr-eval) for formulas.
+
+   HIGH      Client bundle imports "openai"  security/server-module-in-client
+             lib/openai.ts:1
+             │ import OpenAI from 'openai';
+             lib/openai.ts is browser code (imported via components/ChatAssistant.tsx) and imports
+             "openai" (an LLM SDK; calling it from the browser means shipping your API key). The
+             file also sets `dangerouslyAllowBrowser: true`.
+             Fix  Keep server SDKs in modules that start with `import "server-only"` and expose what
+                  the UI needs through a route handler or server action. In the browser use the
+                  public SDKs (@stripe/stripe-js, Supabase anon client).
+
+   HIGH      Client bundle imports "stripe"  security/server-module-in-client
+             lib/stripe.ts:1
+             │ import Stripe from 'stripe';
+             lib/stripe.ts is browser code (imported via components/UpgradeButton.tsx) and imports
+             "stripe" (the Stripe Node SDK, which needs your secret key; use @stripe/stripe-js in
+             the browser).
+             Fix  Keep server SDKs in modules that start with `import "server-only"` and expose what
+                  the UI needs through a route handler or server action. In the browser use the
+                  public SDKs (@stripe/stripe-js, Supabase anon client).
+
+   HIGH      Route handler POST /api/chat has no auth check  security/unauthenticated-route ~heuristic
+             app/api/chat/route.ts:14
+             │ export async function POST(req: Request) {
+             Route handler POST /api/chat calls `openai.chat` (a privileged or paid API) but no
+             authentication or authorization check was found in the handler.
+             Fix  At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+   HIGH      Route handler DELETE /api/todos/[id] has no auth  security/unauthenticated-route ~heuristic
+             check
+             app/api/todos/[id]/route.ts:5
+             │ export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+             Route handler DELETE /api/todos/[id] writes to the database but no authentication or
+             authorization check was found in the handler.
+             Fix  At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+   HIGH      Server action updateProfile() has no auth check  security/unauthenticated-route ~heuristic
+             app/dashboard/actions.ts:5
+             │ export async function updateProfile(formData: FormData) {
+             Server action updateProfile() writes to the database but no authentication or
+             authorization check was found in the handler (server actions are callable by anyone who
+             can load the page).
+             Fix  At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+   MEDIUM    No Content-Security-Policy header  security/missing-csp
+             next.config.js
+             No Content-Security-Policy is set in the framework config, middleware, hosting config
+             or HTML.
+             Fix  Start with a report-only policy and tighten it: `Content-Security-Policy:
+                  default-src 'self'; img-src 'self' data: https:; connect-src 'self'
+                  https://<project>.supabase.co; frame-ancestors 'none'`. For Next.js with inline
+                  scripts, use the nonce-based middleware pattern from the Next.js CSP guide.
+
+   MEDIUM    5 of 5 recommended security headers missing  security/missing-security-headers
+             next.config.js
+             No configuration sets: Strict-Transport-Security (forces HTTPS); X-Frame-Options /
+             frame-ancestors (prevents clickjacking); X-Content-Type-Options (stops MIME sniffing);
+             Referrer-Policy (limits URL leakage to third parties); Permissions-Policy (disables
+             unused browser features).
+             Fix  Add an `async headers()` block to next.config (or `headers` in vercel.json /
+                  `_headers` on Netlify / `helmet()` in Express) that sets
+                  Strict-Transport-Security, X-Frame-Options: DENY, X-Content-Type-Options: nosniff,
+                  Referrer-Policy: strict-origin-when-cross-origin and Permissions-Policy.
+
+  NEXT.JS (5)
+
+   HIGH      TypeScript errors are ignored during `next build`  nextjs/build-checks-disabled
+             next.config.js:8
+             │ ignoreBuildErrors: true,
+             next.config.js sets typescript.ignoreBuildErrors: true, so type errors never block a
+             deploy.
+             Fix  Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the
+                  reported errors (run `npx tsc --noEmit`).
+
+   LOW       ESLint is skipped during `next build`  nextjs/build-checks-disabled
+             next.config.js:11
+             │ ignoreDuringBuilds: true,
+             next.config.js sets eslint.ignoreDuringBuilds: true. Make sure lint runs in CI instead.
+             Fix  Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the
+                  reported errors (run `npx tsc --noEmit`).
+
+   LOW       next/image optimization is turned off  nextjs/images-unoptimized
+             next.config.js:4
+             │ unoptimized: true,
+             next.config.js sets images.unoptimized: true for a server-rendered app.
+             Fix  Remove `unoptimized: true` and configure `images.remotePatterns` for external
+                  hosts. Keep it only with `output: "export"`.
+
+   LOW       App Router has no error.tsx  nextjs/missing-error-boundary
+             app
+             No error.tsx or global-error.tsx under app/.
+             Fix  Add app/error.tsx (a "use client" component with a reset button) and
+                  app/global-error.tsx for errors in the root layout.
+
+   LOW       App Router has no not-found.tsx  nextjs/missing-not-found
+             app
+             No app/not-found.tsx.
+             Fix  Add app/not-found.tsx (App Router) or pages/404.tsx (Pages Router) with a link
+                  home.
+
+  DEPENDENCIES (5)
+
+   CRITICAL  next 14.1.0 allows bypassing middleware.ts  dependencies/next-middleware-bypass
+             package.json:13
+             │ "next": "14.1.0",
+             next 14.1.0 is affected by CVE-2025-29927 (fixed in 14.2.25) and the project uses
+             middleware.ts, which performs auth checks.
+             Fix  Upgrade Next.js to 12.3.5, 13.5.9, 14.2.25, 15.2.3 or later, and re-check auth
+                  inside pages/route handlers instead of relying on middleware alone.
+
+   HIGH      react "^18.2.0" and react-dom "latest" do not  dependencies/react-version-mismatch
+             match
+             package.json:16
+             │ "react-dom": "latest",
+             package.json declares react@"^18.2.0" but react-dom@"latest"; they can resolve to
+             different versions.
+             Fix  Install matching versions (`npm install react@X react-dom@X`), then `npm dedupe`
+                  and check `npm ls react`.
+
+   MEDIUM    No lockfile  dependencies/missing-lockfile
+             package.json
+             package.json declares dependencies but no package-lock.json, pnpm-lock.yaml, yarn.lock
+             or bun.lock is present.
+             Fix  Run your package manager once (`npm install`, `pnpm install`) and commit the
+                  generated lockfile; use `npm ci` / `pnpm install --frozen-lockfile` in CI and
+                  deploys.
+
+   MEDIUM    next 14.1.0 is 2 major versions behind  dependencies/outdated-framework
+             package.json:13
+             │ "next": "14.1.0",
+             next 14.1.0 is in use; the current major is 16.
+             Fix  Upgrade one major at a time with the official codemods (`npx @next/codemod@latest
+                  upgrade`), running the build and tests between steps.
+
+   MEDIUM    1 dependency not pinned  dependencies/unpinned-version
+             package.json:16
+             │ "react-dom": "latest",
+             react-dom@"latest".
+             Fix  Pin to a caret range of the version you tested (`npm install next@15.5.4` writes
+                  "^15.5.4").
+
+  CONFIGURATION (5)
+
+   MEDIUM    No .env.example  config/env-example
+             lib/openai.ts:4
+             │ apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+             The code reads 4 environment variables (NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY,
+             NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY) but there is no
+             .env.example documenting them.
+             Fix  Create or update .env.example with every variable the code reads, using
+                  placeholder values, and commit it.
+
+   MEDIUM    tsconfig.json: "strict" is not enabled  config/typescript-strict
+             tsconfig.json:7
+             │ "strict": false,
+             tsconfig.json: "strict" is not enabled.
+             Fix  Set `"strict": true` in tsconfig.json and fix the errors (`npx tsc --noEmit`).
+                  Enable it file-by-file with `// @ts-check` if the backlog is large.
+
+   LOW       Root layout exports no metadata  seo/missing-metadata
+             app/layout.tsx
+             app/layout.tsx exports neither `metadata` nor `generateMetadata`.
+             Fix  Export `metadata` (title template, description, openGraph) from the root layout,
+                  or add `<title>` and `<meta name="description">` to index.html.
+
+   LOW       No robots.txt  seo/missing-robots
+             Neither public/robots.txt nor an app/robots route exists.
+             Fix  Add app/robots.ts (Next.js) or public/robots.txt that disallows private paths and
+                  links the sitemap.
+
+   LOW       No sitemap  seo/missing-sitemap
+             No sitemap.xml or app/sitemap route was found.
+             Fix  Add app/sitemap.ts (Next.js) or generate public/sitemap.xml at build time (e.g.
+                  vite-plugin-sitemap, next-sitemap).
+
+  CODE QUALITY (3)
+
+   MEDIUM    8 explicit `any`s (30.4 per 1,000 lines)  code-quality/any-density
+             app/dashboard/actions.ts:7 (+7 more)
+             │ const updates: any = Object.fromEntries(formData.entries());
+             8 uses of `any` across 4 files; most in app/dashboard/page.tsx (4),
+             components/ChatAssistant.tsx (2), app/dashboard/actions.ts (1).
+             Fix  Replace `any` with real types or `unknown` + narrowing; generate database types
+                  (`supabase gen types typescript`, Prisma client) instead of `any` rows.
+
+   LOW       3 console.log calls left in source  code-quality/console-log
+             app/dashboard/page.tsx:21 (+2 more)
+             │ console.log('loaded data', todoData, noteData);
+             3 debug logs in 2 files (3 in browser code); most in app/dashboard/page.tsx (2),
+             components/ChatAssistant.tsx (1).
+             Fix  Remove debug logs, or use a logger with levels (pino, consola) and strip
+                  `console.log` in production builds (`compiler.removeConsole` in next.config).
+
+   LOW       2 TODO/FIXME markers, 2 security-related  code-quality/todo-comments
+             app/api/todos/[id]/route.ts:4 (+1 more)
+             │ // TODO: add auth check before launch
+             2 markers (0 FIXME/HACK/XXX). Security-related: app/api/todos/[id]/route.ts:4,
+             app/dashboard/actions.ts:8.
+             Fix  Review each marker; implement or track it in your issue tracker, then delete it.
+
+  ~heuristic = pattern-based check, verify manually. Add --md report.md for a shareable report, --verbose for "why it matters".
