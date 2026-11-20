@@ -304,6 +304,7 @@ export const AUTH_SIGNAL_RE = new RegExp(
 /** Endpoints that have to be callable without a session: sign-in, sign-up, OAuth callbacks, password reset. */
 const PUBLIC_AUTH_URL_RE =
   /\/(?:auth|login|log-in|signin|sign-in|signup|sign-up|register|logout|log-out|signout|sign-out|callback|forgot-password|reset-password|verify-email|confirm|otp|magic-link|oauth)(?:\/|$)/i;
+const PUBLIC_INGEST_URL_RE = /\/(?:csp-report|report-uri|csp|health|healthz|ping|status|telemetry|analytics|track|beacon|vitals)(?:\/|$)/i;
 const PUBLIC_AUTH_CALL_RE =
   /\.auth\.(?:signUp|signInWith\w+|signOut|resetPasswordForEmail|verifyOtp|exchangeCodeForSession)\s*\(|\b(?:signIn|signUp|signOut|createUserWithEmailAndPassword|signInWithEmailAndPassword)\s*\(/;
 
@@ -386,7 +387,8 @@ export const unauthenticatedRouteRule = defineRule({
 
     const consider = (file: string, url: string, kind: 'route' | 'api' | 'action', exportName: string, line: number, body: string) => {
       if (AUTH_SIGNAL_RE.test(body)) return;
-      if (kind !== 'action' && PUBLIC_AUTH_URL_RE.test(url)) return;
+      // Sign-in / sign-up / password-reset endpoints have to work without a session (for actions, judge by the file path).
+      if (PUBLIC_AUTH_URL_RE.test(kind === 'action' ? `/${file.replace(/\/[^/]+$/, '').replace(/\([^)]+\)\//g, '')}/` : url)) return;
       // `export async function POST(req) { return GET(req) }`: the other handler decides, and it is judged on its own.
       if (/\breturn\s+(?:await\s+)?(?:GET|POST|PUT|PATCH|DELETE)\s*\(/.test(body)) return;
       // Nothing awaited means nothing was read or written: a stub or a static response.
@@ -395,8 +397,11 @@ export const unauthenticatedRouteRule = defineRule({
       const privileged = PRIVILEGED_RE.test(body);
       // Every export of a "use server" file is an endpoint, but one that neither writes nor touches a privileged
       // client (a formatter, a read through the caller's own RLS-bound client) is not worth a finding.
-      const mutating = kind === 'action' ? DB_WRITE_RE.test(body) : MUTATING_METHODS.has(exportName) || DB_WRITE_RE.test(body);
+      const writes = DB_WRITE_RE.test(body);
+      const mutating = kind === 'action' ? writes : MUTATING_METHODS.has(exportName) || writes;
       if (!mutating && !privileged) return;
+      // Browsers and beacons post to these without credentials by design.
+      if (!writes && !privileged && PUBLIC_INGEST_URL_RE.test(url)) return;
       // Middleware-only auth is fragile (matchers drift; CVE-2025-29927 bypassed it entirely): report it, but as low.
       const onlyMiddleware = kind !== 'action' && mw?.covers(url) === true;
       const original = ctx.read(file);
@@ -410,7 +415,9 @@ export const unauthenticatedRouteRule = defineRule({
           ? `calls \`${priv}\` (a privileged or paid API)`
           : `accepts ${kind === 'action' ? 'form submissions' : `${exportName} requests`}`;
       out.push({
-        severity: onlyMiddleware ? 'low' : mutating ? 'high' : 'medium',
+        // High needs evidence of impact: a database write, or a privileged/paid client behind a mutating method.
+        // "Accepts POST with no visible check" alone is a prompt to review, not a proven hole.
+        severity: onlyMiddleware ? 'low' : writes || (privileged && mutating) ? 'high' : 'medium',
         title: onlyMiddleware ? `${label} relies on middleware for auth` : `${label} has no auth check`,
         message: onlyMiddleware
           ? `${label} ${does} and has no auth check of its own; it depends entirely on ${mw!.file}.`
@@ -486,9 +493,11 @@ export const unverifiedWebhookRule = defineRule({
       if (!isWebhook && !(isHandlerFile(f.path) && /\b(req|request)\b/.test(code)) ) continue;
       if (/(^|\/)(scripts?|tools|bin|seed|e2e)\//.test(f.path)) continue;
       if (SIGNATURE_SIGNAL_RE.test(code)) continue;
-      // A "webhook" route that authenticates its caller is a management endpoint (create/rotate/test a webhook),
+      // A handler that authenticates its caller is a management endpoint (create/rotate/retry a webhook),
       // or a receiver protected by a bearer secret. Either way it does not trust anonymous requests.
-      if (!stripeEvents && AUTH_SIGNAL_RE.test(code)) continue;
+      if (AUTH_SIGNAL_RE.test(code)) continue;
+      // A stub that awaits nothing processes nothing (e.g. "moved to /functions/v1/stripe-webhook").
+      if (!/\bawait\b|\.then\s*\(/.test(code)) continue;
       const original = ctx.read(f.path);
       const lineMatch = matchAll(original, code, /export\s+(?:async\s+)?(?:function|const)\s+POST\b|export\s+default\b|['"]checkout\.session\.completed['"]/g)[0];
       out.push({

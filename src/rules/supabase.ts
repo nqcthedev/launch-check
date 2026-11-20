@@ -11,7 +11,7 @@ export function maskSqlStrings(sql: string): string {
 function sqlFiles(ctx: ProjectContext): string[] {
   return ctx.files
     .map((f) => f.path)
-    .filter((p) => p.endsWith('.sql') && !isTestPath(p))
+    .filter((p) => p.endsWith('.sql') && !isTestPath(p) && !/\.(assert|test|spec)\.sql$/.test(p))
     .sort((a, b) => {
       // Migrations apply in filename order; keep that order, seed files last.
       const seedA = /seed/i.test(a) ? 1 : 0;

@@ -141,6 +141,8 @@ export function findGenericSecrets(text: string): SecretHit[] {
     if (isPlaceholder(value)) continue;
     if (/^(https?:|\/|\.\/|[A-Z][A-Z0-9_]+$)/.test(value)) continue; // URLs, paths, env var names
     if (value.includes('${')) continue; // a template literal is computed at runtime, not a stored secret
+    if (/^\$2[aby]\$\d\d\$/.test(value)) continue; // a bcrypt hash is not a credential
+    if (/(?:^|_)(?:dummy|fake|mock|sample|example|placeholder|test)(?:_|$)/i.test(name.replace(/([a-z])([A-Z])/g, '$1_$2'))) continue;
     if (/^[a-z]+(?:[-_.:/][a-z0-9]+)+$/i.test(value) && /[a-z]{3,}[-_.:/][a-z]{3,}/i.test(value) && !/[A-Za-z0-9]{20,}/.test(value)) continue; // readable identifiers: "auth-token-cookie", "valid-user-token-123"
     const entropy = shannonEntropy(value);
     if (entropy < 3.5) continue;

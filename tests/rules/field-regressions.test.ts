@@ -27,6 +27,7 @@ describe('supabase/rls-disabled: field regressions', () => {
         'package.json': supa,
         'supabase/baseline.sql': "create event trigger t on ddl_command_end when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO') execute function f();",
         'tests/fixtures/live-tables.sql': 'create table public.some_table (id bigint not null);',
+        'scripts/sql/pickup.assert.sql': 'create table public.zz_before as select 1;',
       },
       'supabase/rls-disabled',
     );
@@ -136,6 +137,7 @@ describe('secrets/hardcoded-key: field regressions', () => {
         'lib/session.ts': "const _DEV_EPHEMERAL_SECRET = `merchant-dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;\nconst ADMIN_PASSWORD_SALT = 'zurichjs:admin-password:v1';",
         'test-fixtures/security-flaw.js': 'const jwt_secret = "Zx81kQp0Lm3Nv7Rt5Yw2Bc9D";',
         'lib/push.ts': 'const VAPID_PRIVATE_KEY = "VHaIyQ81kQp0Lm3Nv7Rt5Yw2Bc9DxZ81kQp0Lm3Nv7R";',
+        'lib/signin-guard.ts': "export const DUMMY_PASSWORD_HASH = '$2b$10$NzbmpQ81kQp0Lm3Nv7Rt5Yw2Bc9DxZ81kQp0Lm3Nv7RtYw2Bc9Dx1';\nconst fakeApiSecret = 'Zx81kQp0Lm3Nv7Rt5Yw2Bc9D';",
       },
       'secrets/hardcoded-key',
     );
@@ -230,6 +232,25 @@ describe('security/unauthenticated-route: field regressions', () => {
     expect(titles(out)).toEqual(['Route handler PATCH /api/admin/users/role has no auth check']);
   });
 
+  it('keeps high for proven impact and uses medium for a bare unauthenticated POST', async () => {
+    const out = await findings(
+      {
+        ...base,
+        'app/api/make-admin/route.ts': `export async function POST(request: Request) {\n  const { email } = await request.json();\n  await sql\`UPDATE users SET role = 'admin' WHERE email = \${email}\`;\n}`,
+        'app/api/chat/route.ts': `export async function POST(req: Request) {\n  const { messages } = await req.json();\n  return openai.chat.completions.create({ messages });\n}`,
+        'app/api/render/route.ts': `export async function POST(req: Request) {\n  const body = await req.json();\n  return Response.json(await startRender(body));\n}`,
+        'app/api/csp-report/route.ts': `export async function POST(req: Request) {\n  const raw = await req.text();\n  log(raw);\n  return new Response(null, { status: 204 });\n}`,
+        'app/(auth)/forgot-password/actions.ts': `'use server';\nexport async function resetPasswordWithOtpAction(payload: { email: string; otp: string }) {\n  await supabaseAdmin.auth.admin.updateUserById(payload.email, {});\n}`,
+      },
+      'security/unauthenticated-route',
+    );
+    expect(out.map((f) => [f.severity, f.title]).sort()).toEqual([
+      ['high', 'Route handler POST /api/chat has no auth check'],
+      ['high', 'Route handler POST /api/make-admin has no auth check'],
+      ['medium', 'Route handler POST /api/render has no auth check'],
+    ]);
+  });
+
   it('skips sign-up/sign-in endpoints and non-function exports of "use server" files', async () => {
     const out = await findings(
       {
@@ -274,6 +295,8 @@ describe('security/unverified-webhook: field regressions', () => {
         'app/api/stripe/webhook/route.js': `export async function POST(req) {\n  const secret = process.env.STRIPE_WEBHOOK_SECRET;\n  const event = await createStripeWebhookEvent(req, secret);\n  if (event.type === 'checkout.session.completed') {}\n}`,
         'app/api/scripts/[id]/webhook/regenerate/route.ts': `export async function POST(req: Request) {\n  const session = await getServerSession();\n  if (!session) return new Response('no', { status: 401 });\n}`,
         'app/api/webhooks/github/route.ts': `export async function POST(req: Request) {\n  const payload = await req.json();\n  await db.insert(events).values(payload);\n}`,
+        'supabase/functions/gift-card-webhook/index.ts': `serve(() => new Response('Moved to stripe-webhook', { status: 410 }));`,
+        'supabase/functions/webhook-retry-processor/index.ts': `serve(async (req) => {\n  const authHeader = req.headers.get('Authorization');\n  if (!authHeader) throw new Error('Missing authorization header');\n  const event = await next();\n  if (event.type === 'checkout.session.completed') {}\n});`,
       },
       'security/unverified-webhook',
     );
