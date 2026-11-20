@@ -65,11 +65,11 @@ The project type is detected from `package.json` and the file tree: **Next.js** 
 | `secrets/server-env-in-client` | high | Server-only env vars read in modules that reach the browser bundle |
 | **Supabase & Firebase** | | |
 | `supabase/rls-disabled` | critical | Tables in `public` created in migrations without `enable row level security` (migrations replayed in order; later `enable`/`disable`/`drop` are honoured) |
-| `supabase/permissive-policy` | high | Policies with `using (true)` / `with check (true)`; dropped policies are not reported |
+| `supabase/permissive-policy` | high | Policies with `using (true)` / `with check (true)`: high when anyone can update or delete rows, medium for public read or insert-only; dropped policies are not reported |
 | `supabase/service-role-in-client` | critical | The service role key referenced from browser code |
-| `firebase/open-security-rules` | critical | `allow read, write: if true`, unconditional `allow`, expired-or-not "test mode" rules, public Realtime Database rules |
+| `firebase/open-security-rules` | critical | `allow read, write: if true`, unconditional `allow` (write: critical, read-only: medium), expired-or-not "test mode" rules, public Realtime Database rules |
 | **Application security** | | |
-| `security/unauthenticated-route` | high | Route handlers, Pages API routes and server actions that write data or call a privileged/paid API with no visible auth check _(heuristic)_ |
+| `security/unauthenticated-route` | high | Route handlers, Pages API routes and server actions that write data or call a privileged/paid API with no visible auth check; a bare unauthenticated POST with neither is medium _(heuristic)_ |
 | `security/unverified-webhook` | high | Webhook handlers (Stripe and others) that never verify the signature _(heuristic)_ |
 | `security/server-module-in-client` | high | Browser code importing `stripe`, `openai`, database drivers, `firebase-admin`, `server-only`, Node built-ins, `next/headers` |
 | `security/dangerously-set-inner-html` | high | `dangerouslySetInnerHTML` with non-constant, unsanitized input |
@@ -343,6 +343,12 @@ The broken fixture must contain "secrets" for the detectors to find, but nothing
 - The Supabase keys are JWTs built for the fixture: their payload says `"ref":"fakeprojectref000000"` and the signature segment is literally `FAKE-launch-check-fixture-signature-not-a-real-key`, so they cannot be valid for any project.
 - The unit tests assemble fake keys at runtime (`['sk_', 'live_', ...].join('')`), so the test sources contain no provider-shaped literals at all.
 - Reports never print secrets: every snippet goes through redaction (`sk_live_******…(49 chars)`), and a test asserts the fake values never appear in the JSON output.
+
+## Field validation
+
+In November 2026 launch-check was run over 300 public GitHub repositories built with Lovable, Bolt, v0, Cursor and Claude Code, and 205 of its findings were read by hand. The first pass exposed several noisy rules (React `hooks/` folders reported as webhooks, the stock shadcn/ui `chart.tsx` reported as an XSS risk, PEM header strings and test fakes reported as leaked keys). Those were fixed, each with a regression test in [`tests/rules/field-regressions.test.ts`](tests/rules/field-regressions.test.ts), and the sample was scanned again.
+
+Of 89 randomly sampled findings that the current version still reports, 61 were clearly actionable, 26 were correct but depended on context that is not in the repository (is this endpoint public on purpose?), and 2 were wrong. The heuristic rules carry most of the uncertainty: for `security/unauthenticated-route` at high severity, 8 of 13 were clearly missing auth, 4 were arguably public by design and 1 was wrong.
 
 ## Limitations
 
