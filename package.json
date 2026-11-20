@@ -1,0 +1,60 @@
+{
+  "name": "launch-check",
+  "version": "0.1.0",
+  "description": "Production-readiness audit for AI-built (Lovable, Bolt, v0, Cursor, Claude Code) Next.js, Vite and Node apps: leaked secrets, Supabase RLS, unauthenticated routes, missing headers and more.",
+  "type": "module",
+  "bin": {
+    "launch-check": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:update": "vitest run -u",
+    "dev": "node --import tsx src/cli.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "screenshots": "npm run build && node scripts/screenshot.mjs",
+    "case-study": "npm run build && node scripts/case-study.mjs"
+  },
+  "keywords": [
+    "audit",
+    "security",
+    "nextjs",
+    "supabase",
+    "vite",
+    "lovable",
+    "bolt",
+    "cursor",
+    "claude-code",
+    "vibe-coding",
+    "production-readiness",
+    "cli"
+  ],
+  "author": "Cuong Nguyen",
+  "license": "MIT",
+  "dependencies": {
+    "ignore": "^7.0.5",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

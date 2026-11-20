@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+# Fixture build artifacts (fixtures are scanned, never built in-tree)
+fixtures/**/node_modules/
+fixtures/**/.next/
