@@ -1,5 +1,6 @@
 import type { FindingInput, ProjectContext, Severity } from '../types.js';
 import {
+  PUBLIC_BY_DESIGN_RE,
   decodeJwt,
   isPlaceholder,
   looksSecretEnvName,
@@ -9,6 +10,7 @@ import {
   shannonEntropy,
 } from '../utils/secrets.js';
 import { LineIndex, snippetOf } from '../utils/text.js';
+import { isTestPath } from '../context.js';
 import { defineRule, envRefs, isEnvTemplate, isSourcePath, parseDotenv, plural } from './helpers.js';
 
 export interface SecretHit {
@@ -34,7 +36,13 @@ const LOCAL_HOST_RE = /@(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.interna
  * clearly-fake fixture keys (e.g. `sk_live_DUMMY-...`) still exercise them.
  */
 const PROVIDERS: Provider[] = [
-  { kind: 'Private key (PEM)', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/g, severity: 'critical' },
+  {
+    kind: 'Private key (PEM)',
+    // The header alone is not a key: code that checks `.includes("-----BEGIN PRIVATE KEY-----")` and placeholders
+    // ("-----BEGIN PRIVATE KEY-----\n...\n-----END") are everywhere. Require real base64 key material after it.
+    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----(?=(?:\\r|\\n|\s|&#10;|["'`+,]){1,12}[A-Za-z0-9+/]{40,})/g,
+    severity: 'critical',
+  },
   { kind: 'Anthropic API key', re: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{20,}/g, severity: 'critical' },
   {
     kind: 'OpenAI API key',
@@ -50,7 +58,7 @@ const PROVIDERS: Provider[] = [
     kind: 'Google API key',
     re: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     severity: 'medium',
-    note: 'If this is a Firebase web config key it is public by design; make sure it is restricted to your domains in Google Cloud Console.',
+    note: 'Google API keys are only safe to publish when they are restricted (HTTP referrer / API restrictions) in Google Cloud Console.',
   },
   { kind: 'GitHub token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{50,}/g, severity: 'critical' },
   { kind: 'Slack token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}/g, severity: 'high' },
@@ -62,6 +70,8 @@ const PROVIDERS: Provider[] = [
     validate: (v) => {
       const password = /:\/\/[^:]+:([^@]+)@/.exec(v)?.[1] ?? '';
       if (LOCAL_HOST_RE.test(`${v}/`) || isPlaceholder(password) || /^\$\{?[A-Z_]+\}?$/.test(password)) return { ok: false };
+      // Template literals (`postgres://${user}:${pass}@${host}`) and documentation ("postgres://user:[PASSWORD]@[HOST]") hold no secret.
+      if (/\$\{|\\\$|[[\]<>{}]|%s/.test(v)) return { ok: false };
       return { ok: true };
     },
   },
@@ -72,6 +82,8 @@ const PROVIDERS: Provider[] = [
     validate: (v) => {
       const jwt = decodeJwt(v);
       const role = jwt?.payload.role;
+      // The service_role key printed by `supabase start` is the same for every local stack and unlocks nothing hosted.
+      if (role === 'service_role' && jwt?.payload.iss === 'supabase-demo') return { ok: false };
       if (role === 'service_role') {
         return {
           ok: true,
@@ -128,7 +140,8 @@ export function findGenericSecrets(text: string): SecretHit[] {
     if (/(public|publishable|anon|site_?key|token_?(url|endpoint|type)|_url$|_path$|_name$|_header$)/i.test(name)) continue;
     if (isPlaceholder(value)) continue;
     if (/^(https?:|\/|\.\/|[A-Z][A-Z0-9_]+$)/.test(value)) continue; // URLs, paths, env var names
-    if (/^[a-z]+(?:[-_.][a-z]+)+$/.test(value)) continue; // kebab/snake identifiers, e.g. "auth-token-cookie"
+    if (value.includes('${')) continue; // a template literal is computed at runtime, not a stored secret
+    if (/^[a-z]+(?:[-_.:/][a-z0-9]+)+$/i.test(value) && /[a-z]{3,}[-_.:/][a-z]{3,}/i.test(value) && !/[A-Za-z0-9]{20,}/.test(value)) continue; // readable identifiers: "auth-token-cookie", "valid-user-token-123"
     const entropy = shannonEntropy(value);
     if (entropy < 3.5) continue;
     if (!/\d/.test(value) && value.length < 32) continue;
@@ -147,6 +160,31 @@ export function redactSecrets(text: string): string {
   let out = text;
   for (const hit of [...findProviderSecrets(text), ...findGenericSecrets(text)]) out = redactInLine(out, hit.value);
   return out;
+}
+
+const TEST_SUPPORT_RE =
+  /(^|\/)(?:[\w.]+-)?(mocks?|fixtures?|test-utils?|testing|tests?)(?:-[\w.]+)?\/|(^|\/)ci\/|(^|\/)(test-setup|setup-?tests?|jest\.setup|vitest\.setup)\.[cm]?[jt]sx?$|\.mock\.[cm]?[jt]sx?$|(^|[\/._-])test[._-][\w.-]*$/i;
+
+/**
+ * `AIza...` is one format for two very different things: the Firebase web config key, which Firebase documents as
+ * public, and keys for paid Google APIs (Gemini), which are secrets. Tell them apart by what surrounds the key.
+ */
+function classifyGoogleKey(hit: SecretHit, text: string, idx: LineIndex): SecretHit {
+  const line = idx.lineOf(hit.index);
+  const lines = text.split(/\r?\n/);
+  const around = lines.slice(Math.max(0, line - 9), line + 8).join('\n');
+  if (/authDomain|storageBucket|messagingSenderId|measurementId|firebaseapp\.com|firebaseConfig/i.test(around)) {
+    return {
+      ...hit,
+      kind: 'Firebase web API key',
+      severity: 'info',
+      note: 'Firebase web config keys are public by design; your Firestore/Storage security rules are what protect the data.',
+    };
+  }
+  if (/gemini|generative-?ai|genai|googleAI\b|GOOGLE_API_KEY/i.test(text)) {
+    return { ...hit, kind: 'Google API key used with a Gemini client', severity: 'high', note: 'A Gemini key is billed to you: anyone holding it can spend your quota.' };
+  }
+  return hit;
 }
 
 const SCAN_SKIP_RE = /(^|\/)(package\.json|tsconfig[\w.-]*\.json|jsconfig\.json|composer\.lock|.*\.lock)$/;
@@ -173,8 +211,13 @@ export const hardcodedSecretRule = defineRule({
       const text = ctx.read(file.path);
       if (!text) continue;
       const idx = new LineIndex(text);
-      const hits = [...findProviderSecrets(text)];
-      if (isSourcePath(file.path)) {
+      // Test suites and mocks are full of provider-shaped fakes ("xoxb-111...", "whsec_test..."). Only keep what is
+      // critical even there (a real private key, a live key, a database URL pointing at a real host).
+      const inTest = isTestPath(file.path) || TEST_SUPPORT_RE.test(file.path);
+      const hits = findProviderSecrets(text)
+        .filter((h) => !inTest || h.severity === 'critical')
+        .map((h) => (h.kind === 'Google API key' ? classifyGoogleKey(h, text, idx) : h));
+      if (isSourcePath(file.path) && !inTest) {
         const generic = findGenericSecrets(ctx.code(file.path)).filter(
           (g) => !hits.some((h) => idx.lineOf(h.index) === idx.lineOf(g.index)),
         );
@@ -222,8 +265,12 @@ export const envFileCommittedRule = defineRule({
       if (env.gitignored && !isTracked) continue;
       const text = ctx.read(env.path);
       const entries = parseDotenv(text);
-      const providerHits = findProviderSecrets(text);
       const idx = new LineIndex(text);
+      const nameAt = new Map(entries.map((e) => [e.line, e.name]));
+      // A Google Maps / Firebase browser key is published on purpose; its `AIza` shape alone does not make it a secret.
+      const providerHits = findProviderSecrets(text).filter(
+        (h) => !(h.kind === 'Google API key' && PUBLIC_BY_DESIGN_RE.test(nameAt.get(idx.lineOf(h.index)) ?? '')),
+      );
       const secretLines = new Set(providerHits.map((h) => idx.lineOf(h.index)));
       const secretNames: string[] = [];
       let firstLine: number | undefined;
@@ -236,9 +283,11 @@ export const envFileCommittedRule = defineRule({
         }
       }
       const status = isTracked ? 'is tracked by git' : 'is not covered by .gitignore, so the next `git add .` commits it';
+      // .env.test / e2e/.env hold throwaway credentials for a local stack far more often than production ones.
+      const testEnv = /(^|\/)\.env\.(test|testing|ci|e2e)(\.|$)/.test(env.path) || isTestPath(env.path);
       if (secretNames.length > 0) {
         out.push({
-          severity: 'critical',
+          severity: testEnv ? 'medium' : 'critical',
           title: `${env.path} with live secrets ${isTracked ? 'is committed' : 'is not gitignored'}`,
           message: `${env.path} ${status}. It contains ${plural(secretNames.length, 'secret-looking value')}: ${secretNames.join(', ')}.`,
           file: env.path,

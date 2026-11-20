@@ -204,6 +204,12 @@ export const dangerousHtmlRule = defineRule({
         if (/^(['"])[^'"]*\1$/.test(expr) || /^`[^`$]*`$/.test(expr)) continue;
         if (/\b(DOMPurify\.sanitize|sanitize(Html)?|purify|xss|escapeHtml|sanitizeHtml)\s*\(/i.test(expr)) continue;
         if (/^JSON\.stringify\(/.test(expr)) continue; // JSON-LD; see README limitations
+        // <style> cannot run script (the stock shadcn/ui chart.tsx builds its theme CSS this way), and a
+        // <script type="application/ld+json"> block is data, not code.
+        const tagStart = structural.lastIndexOf('<', m.index ?? 0);
+        const openTag = tagStart === -1 ? '' : original.slice(tagStart, Math.min(original.length, (end > 0 ? end : exprStart) + 200));
+        if (/^<style\b/.test(openTag)) continue;
+        if (/^<script\b/i.test(openTag) && /application\/ld\+json/.test(openTag)) continue;
         const line = idx.lineOf(m.index ?? 0);
         out.push({
           title: 'Unsanitized HTML passed to dangerouslySetInnerHTML',
@@ -227,26 +233,82 @@ export const dangerousHtmlRule = defineRule({
  * return the [start, end] offsets of its body.
  */
 export function functionBody(structural: string, at: number): [number, number] {
+  // `export const POST = withAuth(async (req) => {...})`: the handler is the whole call, wrapper name included.
+  const decl = /^export\s+(?:default\s+)?const\s+[\w$]+\s*(?::[^=]+)?=\s*/.exec(structural.slice(at, at + 400));
+  if (decl) {
+    const exprStart = at + decl[0].length;
+    const head = structural.slice(exprStart, exprStart + 200);
+    const call = /^(?:await\s+)?[\w$.]+\s*\(/.exec(head);
+    if (call && !/^(?:async|function)\b/.test(head)) {
+      const close = matchBracket(structural, exprStart + call[0].length - 1);
+      return [at, close === -1 ? structural.length : close + 1];
+    }
+  }
   const paren = structural.indexOf('(', at);
   if (paren === -1) return [at, structural.length];
   const closeParen = matchBracket(structural, paren);
   if (closeParen === -1) return [at, structural.length];
-  const brace = structural.indexOf('{', closeParen);
-  const arrow = structural.indexOf('=>', closeParen);
-  if (arrow !== -1 && (brace === -1 || arrow < brace) && !/^\s*\{/.test(structural.slice(arrow + 2))) {
-    const end = structural.indexOf('\n', arrow);
-    return [at, end === -1 ? structural.length : end];
+  // Walk past a return type annotation (`): Promise<{ ok: boolean }> {`) to the brace that opens the body.
+  let angle = 0;
+  for (let i = closeParen + 1; i < structural.length; i++) {
+    const ch = structural[i];
+    if (ch === '<') angle++;
+    else if (ch === '>' && structural[i - 1] !== '=') angle = Math.max(0, angle - 1);
+    else if (ch === '=' && structural[i + 1] === '>' && angle === 0) {
+      const rest = /^\s*/.exec(structural.slice(i + 2))![0].length + i + 2;
+      if (structural[rest] === '{') {
+        const end = matchBracket(structural, rest);
+        return [at, end === -1 ? structural.length : end + 1];
+      }
+      const end = structural.indexOf('\n', i);
+      return [at, end === -1 ? structural.length : end];
+    } else if (ch === '{') {
+      const before = structural.slice(closeParen, i).trimEnd().slice(-1);
+      if (angle > 0 || before === ':' || before === '|' || before === '&') {
+        const skip = matchBracket(structural, i); // object type literal inside the annotation
+        if (skip === -1) return [at, structural.length];
+        i = skip;
+        continue;
+      }
+      const end = matchBracket(structural, i);
+      return [at, end === -1 ? structural.length : end + 1];
+    } else if (ch === ';' && angle === 0) {
+      return [at, i]; // overload signature / declaration without a body
+    }
   }
-  if (brace === -1) return [at, structural.length];
-  const end = matchBracket(structural, brace);
-  return [at, end === -1 ? structural.length : end + 1];
+  return [at, structural.length];
 }
 
-export const AUTH_SIGNAL_RE =
-  /\bauth\s*\(\s*\)|\bauth\.protect\s*\(|\b(?:getServerSession|getSession|getUser|getClaims|currentUser|requireAuth|requireUser|requireAdmin|requireSession|requireRole|withAuth|withApiAuthRequired|isAuthenticated|ensureAuth|checkAuth|verifyToken|verifyJwt|verifyIdToken|jwtVerify|jwt\.verify|validateRequest|getToken|getAuth|clerkClient|getKindeServerSession|authorize|unauthori[sz]ed|forbidden)\b|\b(?:401|403)\b|['"]authorization['"]|headers\.authorization|x-api-key|CRON_SECRET|API_SECRET|ADMIN_TOKEN/i;
+/**
+ * Evidence that a handler identifies or authorizes its caller. Deliberately generous: project-specific helpers
+ * (requireManagementAuth, checkAdminAuth, withProfileAuth, hasPermission, requireUserId, getCurrentUser) count,
+ * because a missed finding is cheaper than telling someone their guarded endpoint is open.
+ */
+export const AUTH_SIGNAL_RE = new RegExp(
+  [
+    String.raw`\bauth\s*\(\s*\)|\bauth\.protect\s*\(`,
+    String.raw`\b(?:getServerSession|getSession|getUser|getClaims|currentUser|withAuth|withApiAuthRequired|isAuthenticated|verifyToken|verifyJwt|verifyIdToken|jwtVerify|jwt\.verify|validateRequest|getToken|getAuth|clerkClient|getKindeServerSession|authorize|unauthori[sz]ed|forbidden|protectedProcedure|adminProcedure)\b`,
+    String.raw`\b[\w$]*auth(?!or)[\w$]*\s*\(`, // requireManagementAuth(), checkAdminAuth(), authenticateRequest(), withProfileAuth()
+    String.raw`\b[\w$]*permission[\w$]*\s*\(`,
+    String.raw`\b(?:require|ensure|assert)[A-Z][\w$]*\s*\(`, // requireUserId(), ensureAdmin(), assertOwner()
+    String.raw`\b(?:check|verify|validate|has|is|api|only|with)[\w$]*(?:Admin|Role|Access|Session|Token|Owner|Ownership|Member|Membership|LoggedIn|SignedIn)[\w$]*\s*\(`, // apiAdmin(), isAdmin()
+    String.raw`\b[\w$]*(?:guard|gate)\s*\(`,
+    String.raw`\bget(?:Current|Session|Logged\w*|Signed\w*|Active)(?:User|Session|Viewer|Actor|Member|Profile|Account)[\w$]*\s*\(`,
+    String.raw`\bgetUserId\s*\(\s*\)`,
+    String.raw`\b(?:401|403)\b|['"]authorization['"]|headers\.authorization|x-api-key`,
+    String.raw`\b(?:CRON|ADMIN|INTERNAL)_(?:API_)?(?:SECRET|TOKEN|KEY)\b|\bAPI_SECRET\b`,
+  ].join('|'),
+  'i',
+);
+
+/** Endpoints that have to be callable without a session: sign-in, sign-up, OAuth callbacks, password reset. */
+const PUBLIC_AUTH_URL_RE =
+  /\/(?:auth|login|log-in|signin|sign-in|signup|sign-up|register|logout|log-out|signout|sign-out|callback|forgot-password|reset-password|verify-email|confirm|otp|magic-link|oauth)(?:\/|$)/i;
+const PUBLIC_AUTH_CALL_RE =
+  /\.auth\.(?:signUp|signInWith\w+|signOut|resetPasswordForEmail|verifyOtp|exchangeCodeForSession)\s*\(|\b(?:signIn|signUp|signOut|createUserWithEmailAndPassword|signInWithEmailAndPassword)\s*\(/;
 
 const SIGNATURE_SIGNAL_RE =
-  /\b(constructEvent(Async)?|webhooks\.verify|verifySignature|verifyWebhook|validateWebhook|Webhook\s*\(|svix|timingSafeEqual|createHmac|stripe-signature|x-hub-signature|x-signature|svix-signature|webhook-signature|CRON_SECRET)\b/i;
+  /\b(constructEvent(Async)?|webhooks\.verify|Webhook\s*\(|svix|timingSafeEqual|createHmac|hmac|CRON_SECRET)\b|[\w$]*verif[\w$]*\s*\(|[\w$]*signature[\w$]*\s*\(|\b\w*(?:WEBHOOK|SIGNING)_(?:SECRET|TOKEN|KEY)\b|secret[-_]token|['"`](?:x-)?[\w-]*(?:signature|hmac|webhook-secret)[\w-]*['"`]|stripe-signature/i;
 
 const DB_WRITE_RE =
   /\.(delete|insert|update|upsert|remove|destroy|updateMany|deleteMany|createMany|\$executeRaw|\$executeRawUnsafe)\s*\(|\b(prisma|db|tx)\.\w+\.create\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
@@ -292,8 +354,15 @@ function routeUrl(path: string, baseDir: string): string {
   return rel === '' ? '/' : rel;
 }
 
+/** Paths that receive provider webhooks. `src/hooks/useThing.ts` (React hooks) is not one of them. */
 function isWebhookPath(p: string): boolean {
-  return /webhook|\/hooks?\//i.test(p);
+  return /webhook/i.test(p) || /(^|\/)api\/(?:.*\/)?hooks?\//i.test(p);
+}
+
+/** Server-side request handlers, as opposed to components or pages that merely have "webhook" in their name. */
+function isHandlerFile(p: string): boolean {
+  if (/\.[jt]sx$/.test(p)) return false;
+  return /(^|\/)route\.[cm]?[jt]s$/.test(p) || /(^|\/)(pages\/api|api|functions|server|routes|controllers|handlers)\//.test(p);
 }
 
 export const unauthenticatedRouteRule = defineRule({
@@ -317,8 +386,16 @@ export const unauthenticatedRouteRule = defineRule({
 
     const consider = (file: string, url: string, kind: 'route' | 'api' | 'action', exportName: string, line: number, body: string) => {
       if (AUTH_SIGNAL_RE.test(body)) return;
-      const mutating = MUTATING_METHODS.has(exportName) || kind === 'action' || DB_WRITE_RE.test(body);
+      if (kind !== 'action' && PUBLIC_AUTH_URL_RE.test(url)) return;
+      // `export async function POST(req) { return GET(req) }`: the other handler decides, and it is judged on its own.
+      if (/\breturn\s+(?:await\s+)?(?:GET|POST|PUT|PATCH|DELETE)\s*\(/.test(body)) return;
+      // Nothing awaited means nothing was read or written: a stub or a static response.
+      if (kind === 'route' && !/\bawait\b|\.then\s*\(/.test(body)) return;
+      if (PUBLIC_AUTH_CALL_RE.test(body)) return;
       const privileged = PRIVILEGED_RE.test(body);
+      // Every export of a "use server" file is an endpoint, but one that neither writes nor touches a privileged
+      // client (a formatter, a read through the caller's own RLS-bound client) is not worth a finding.
+      const mutating = kind === 'action' ? DB_WRITE_RE.test(body) : MUTATING_METHODS.has(exportName) || DB_WRITE_RE.test(body);
       if (!mutating && !privileged) return;
       // Middleware-only auth is fragile (matchers drift; CVE-2025-29927 bypassed it entirely): report it, but as low.
       const onlyMiddleware = kind !== 'action' && mw?.covers(url) === true;
@@ -371,6 +448,8 @@ export const unauthenticatedRouteRule = defineRule({
           const at = m.index ?? 0;
           const [start, end] = functionBody(structural, at);
           const body = code.slice(start, end);
+          // `export const prompt = ai.definePrompt({...})` or a config object is not a server action.
+          if (/^export\s+const\b/.test(m[0]) && !/=>|\bfunction\b/.test(structural.slice(start, end))) continue;
           consider(p, '', 'action', m[1]!, idx.lineOf(at), body);
         }
       }
@@ -394,13 +473,22 @@ export const unverifiedWebhookRule = defineRule({
   run(ctx) {
     const out: FindingInput[] = [];
     for (const f of ctx.sourceFiles()) {
+      if (/\.[jt]sx$/.test(f.path)) continue; // components and pages do not receive webhooks
       const code = ctx.code(f.path);
       const isWebhook =
-        isWebhookPath(f.path) && /export\s+(?:async\s+)?(?:function|const)\s+POST\b|export\s+default\b|\.post\s*\(/.test(code);
+        isWebhookPath(f.path) &&
+        isHandlerFile(f.path) &&
+        /export\s+(?:async\s+)?(?:function|const)\s+POST\b|export\s+default\b|\.post\s*\(|\bserve\s*\(/.test(code);
       const stripeEvents = /['"](checkout\.session\.completed|invoice\.paid|customer\.subscription\.\w+|payment_intent\.succeeded)['"]/.test(code);
       if (!isWebhook && !stripeEvents) continue;
-      if (!isWebhook && !/\b(req|request)\b/.test(code)) continue;
+      // Stripe event names outside a webhook path only count in a file that is itself a request handler
+      // (not a seed script or an end-to-end test helper that builds fake events).
+      if (!isWebhook && !(isHandlerFile(f.path) && /\b(req|request)\b/.test(code)) ) continue;
+      if (/(^|\/)(scripts?|tools|bin|seed|e2e)\//.test(f.path)) continue;
       if (SIGNATURE_SIGNAL_RE.test(code)) continue;
+      // A "webhook" route that authenticates its caller is a management endpoint (create/rotate/test a webhook),
+      // or a receiver protected by a bearer secret. Either way it does not trust anonymous requests.
+      if (!stripeEvents && AUTH_SIGNAL_RE.test(code)) continue;
       const original = ctx.read(f.path);
       const lineMatch = matchAll(original, code, /export\s+(?:async\s+)?(?:function|const)\s+POST\b|export\s+default\b|['"]checkout\.session\.completed['"]/g)[0];
       out.push({

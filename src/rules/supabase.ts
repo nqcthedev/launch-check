@@ -1,11 +1,17 @@
 import type { FindingInput, ProjectContext } from '../types.js';
 import { LineIndex, maskSqlComments, snippetOf } from '../utils/text.js';
+import { isTestPath } from '../context.js';
 import { defineRule, envRefs, matchAll } from './helpers.js';
+
+/** Blank out the contents of single-quoted SQL string literals ('CREATE TABLE AS' inside a string is not DDL). */
+export function maskSqlStrings(sql: string): string {
+  return sql.replace(/'(?:[^'\n]|'')*'/g, (m) => `'${' '.repeat(m.length - 2)}'`);
+}
 
 function sqlFiles(ctx: ProjectContext): string[] {
   return ctx.files
     .map((f) => f.path)
-    .filter((p) => p.endsWith('.sql'))
+    .filter((p) => p.endsWith('.sql') && !isTestPath(p))
     .sort((a, b) => {
       // Migrations apply in filename order; keep that order, seed files last.
       const seedA = /seed/i.test(a) ? 1 : 0;
@@ -27,8 +33,9 @@ function normalizeTable(raw: string): { schema: string; table: string; key: stri
 }
 
 const STATEMENT_RES = {
+  // Group 1: TEMP/TEMPORARY (session-local, never exposed through the API), group 2: name, group 3: PARTITION OF.
   create: new RegExp(
-    String.raw`\bcreate\s+(?:(?:global\s+|local\s+)?(?:temporary|temp)\s+|unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?${QUALIFIED}(\s+partition\s+of\b)?`,
+    String.raw`\bcreate\s+(?:((?:global\s+|local\s+)?(?:temporary|temp)\s+)|unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?${QUALIFIED}(\s+partition\s+of\b)?`,
     'gi',
   ),
   enable: new RegExp(String.raw`\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?${QUALIFIED}\s+enable\s+row\s+level\s+security`, 'gi'),
@@ -50,20 +57,21 @@ export const rlsDisabledRule = defineRule({
   fix:
     'Add `alter table <name> enable row level security;` in a new migration, then write policies scoped to the owner, e.g. ' +
     '`create policy "own rows" on <name> for all using (auth.uid() = user_id) with check (auth.uid() = user_id);`.',
-  appliesTo: (ctx) => sqlFiles(ctx).length > 0,
+  // RLS-or-public is a Supabase (PostgREST) property. Plain Postgres behind Prisma/Drizzle/Neon is not reachable with a browser key.
+  appliesTo: (ctx) => ctx.detection.integrations.includes('supabase') && sqlFiles(ctx).length > 0,
   run(ctx) {
     type Event = { kind: 'create' | 'enable' | 'disable' | 'drop'; key: string; schema: string; table: string; file: string; index: number; order: number };
     const events: Event[] = [];
     let order = 0;
     for (const file of sqlFiles(ctx)) {
-      const sql = maskSqlComments(ctx.read(file));
+      const sql = maskSqlStrings(maskSqlComments(ctx.read(file)));
       const local: Event[] = [];
       for (const kind of ['create', 'enable', 'disable', 'drop'] as const) {
         const re = STATEMENT_RES[kind];
         re.lastIndex = 0;
         for (const m of sql.matchAll(re)) {
-          if (kind === 'create' && m[2]) continue; // partitions inherit the parent's RLS
-          const t = normalizeTable(m[1]!);
+          if (kind === 'create' && (m[1] || m[3])) continue; // temp tables are session-local; partitions inherit the parent's RLS
+          const t = normalizeTable(kind === 'create' ? m[2]! : m[1]!);
           local.push({ kind, ...t, file, index: m.index ?? 0, order: 0 });
         }
       }
@@ -173,22 +181,54 @@ export const permissivePolicyRule = defineRule({
         if (/\bas\s+restrictive\b/i.test(rest)) continue;
         const using = clause(rest, /\busing\s*\(/i);
         const check = clause(rest, /\bwith\s+check\s*\(/i);
-        const open = [using, check].some((c) => c !== null && stripParens(c) === 'true');
-        if (!open) continue;
+        const usingOpen = using !== null && stripParens(using) === 'true';
+        const checkOpen = check !== null && stripParens(check) === 'true';
+        if (!usingOpen && !checkOpen) continue;
         const authOnly = roles.length > 0 && roles.every((r) => r === 'authenticated');
-        const isRead = cmd === 'select';
-        const severity = isRead ? (authOnly ? 'low' : 'medium') : 'high';
         const who = authOnly ? 'any signed-in user' : 'anyone with your public anon key';
-        const action = isRead ? 'read every row of' : cmd === 'all' ? 'read, insert, update and delete every row of' : `${cmd} any row in`;
         const line = idx.lineOf(m.index ?? 0);
-        live.set(key, {
-          severity,
-          title: `Policy "${name}" lets ${who} ${isRead ? 'read' : 'write'} "${table.table}"`,
-          message: `Policy "${name}" on ${table.key} (FOR ${cmd.toUpperCase()}, TO ${roles.join(', ')}) uses \`true\`: ${who} can ${action} ${table.table}.`,
-          file,
-          line,
-          snippet: snippetOf(idx.line(line)),
-        });
+        const base = { file, line, snippet: snippetOf(idx.line(line)) };
+        const head = `Policy "${name}" on ${table.key} (FOR ${cmd.toUpperCase()}, TO ${roles.join(', ')})`;
+        // USING decides which EXISTING rows a statement may touch; WITH CHECK only validates NEW row values.
+        // When WITH CHECK is omitted, Postgres reuses USING for it.
+        // A policy with no USING at all does not restrict existing rows either.
+        const rowsOpen = cmd === 'insert' ? false : usingOpen || (using === null && checkOpen);
+        const newRowsOpen = cmd === 'insert' ? checkOpen || usingOpen : cmd === 'all' ? checkOpen || (usingOpen && check === null) : false;
+        if (cmd === 'select') {
+          live.set(key, {
+            severity: authOnly ? 'low' : 'medium',
+            title: `Policy "${name}" lets ${who} read "${table.table}"`,
+            message: `${head} uses \`true\`: ${who} can read every row of ${table.table}.`,
+            ...base,
+          });
+        } else if (rowsOpen) {
+          const action = cmd === 'all' ? 'read, insert, update and delete every row of' : `${cmd} any row in`;
+          live.set(key, {
+            severity: 'high',
+            title: `Policy "${name}" lets ${who} write "${table.table}"`,
+            message: `${head} uses \`true\`: ${who} can ${action} ${table.table}.`,
+            ...base,
+          });
+        } else if (newRowsOpen) {
+          // Insert-only: correct for a contact form or waitlist, an abuse vector for anything else. Not provable statically.
+          live.set(key, {
+            severity: 'medium',
+            title: `Policy "${name}" lets ${who} insert into "${table.table}"`,
+            message:
+              `${head} uses \`with check (true)\`: ${who} can insert arbitrary rows into ${table.table}. ` +
+              'That is fine for a public form; otherwise bind the row to the caller (e.g. `with check (auth.uid() = user_id)`).',
+            ...base,
+          });
+        } else if (cmd === 'update' && checkOpen) {
+          live.set(key, {
+            severity: 'low',
+            title: `Policy "${name}" does not validate updated rows of "${table.table}"`,
+            message:
+              `${head} limits which rows can be updated, but \`with check (true)\` accepts any new values, ` +
+              'so a user can reassign their own rows (e.g. change user_id). Repeat the USING condition in WITH CHECK.',
+            ...base,
+          });
+        }
       }
     }
     return [...live.values()];
@@ -261,10 +301,12 @@ export const firebaseOpenRulesRule = defineRule({
           if (!always && !testMode) continue;
           const writes = /write|create|update|delete/.test(ops);
           out.push({
-            severity: always ? (writes ? 'critical' : 'high') : 'high',
+            // Public read is often intended (a listing, a public profile); public write never is.
+            severity: always ? (writes ? 'critical' : 'medium') : 'high',
             title: always ? `Firebase rule "allow ${ops}" with no condition` : 'Firebase rules still in test mode',
             message: always
-              ? `${f.path} allows ${ops} for everyone, including unauthenticated visitors.`
+              ? `${f.path} allows ${ops} for everyone, including unauthenticated visitors.` +
+                (writes ? '' : ' Keep it only if this data is meant to be public.')
               : `${f.path} uses the time-limited test-mode rule: everything is public until the date, then everything is denied.`,
             file: f.path,
             line: m.line,
@@ -275,7 +317,7 @@ export const firebaseOpenRulesRule = defineRule({
         const text = ctx.read(f.path);
         for (const m of matchAll(text, text, /"\.(read|write)"\s*:\s*(true|"true")/g)) {
           out.push({
-            severity: m.groups[0] === 'write' ? 'critical' : 'high',
+            severity: m.groups[0] === 'write' ? 'critical' : 'medium',
             title: `Realtime Database "${'.' + m.groups[0]}": true`,
             message: `${f.path} grants public ${m.groups[0]} access.`,
             file: f.path,

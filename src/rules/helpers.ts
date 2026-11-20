@@ -99,7 +99,8 @@ export function parseDotenv(text: string): EnvEntry[] {
   return entries;
 }
 
-export const ENV_TEMPLATE_RE = /(^|\/)\.env\.(example|sample|template|dist|defaults|schema)$|\.example$|\.sample$|\.template$/;
+export const ENV_TEMPLATE_RE =
+  /(^|\/)\.env\.(example|sample|template|dist|defaults|schema)$|\.example$|\.sample$|\.template$|(^|\/)\.env(\.[\w-]+)*\.(example|sample|template)(\.[\w-]+)*$/;
 
 export function isEnvTemplate(path: string): boolean {
   return ENV_TEMPLATE_RE.test(path);

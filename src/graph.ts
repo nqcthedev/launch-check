@@ -6,15 +6,45 @@ export interface ImportRef {
   specifier: string;
   line: number;
   typeOnly: boolean;
+  /** Names of a plain `{ a, b }` import clause; absent for default, namespace, side-effect and dynamic imports. */
+  names?: string[];
 }
 
 const IMPORT_RES: RegExp[] = [
-  /\bimport\s+(type\s+)?(?:[\w$*{}\s,]+?)\s+from\s*(['"])([^'"\n]+)\2/g,
-  /\bexport\s+(type\s+)?(?:[\w$*{}\s,]+?)\s+from\s*(['"])([^'"\n]+)\2/g,
-  /\bimport\s*()(['"])([^'"\n]+)\2/g,
-  /\bimport\(\s*()(['"])([^'"\n]+)\2\s*\)/g,
-  /\brequire\(\s*()(['"])([^'"\n]+)\2\s*\)/g,
+  /\bimport\s+(type\s+)?([\w$*{}\s,]+?)\s+from\s*(['"])([^'"\n]+)\3/g,
+  /\bexport\s+(type\s+)?([\w$*{}\s,]+?)\s+from\s*(['"])([^'"\n]+)\3/g,
+  /\bimport\s*()()(['"])([^'"\n]+)\3/g,
+  /\bimport\(\s*()()(['"])([^'"\n]+)\3\s*\)/g,
+  /\brequire\(\s*()()(['"])([^'"\n]+)\3\s*\)/g,
 ];
+
+/**
+ * `import { type A, type B } from "x"` is erased by the compiler exactly like `import type { A, B }`.
+ * Returns the imported names when the clause is a plain `{ a, b as c }` list (so the caller can check
+ * whether they are all types in the target module), otherwise null.
+ */
+function namedImports(clause: string): { names: string[]; allInlineTypes: boolean } | null {
+  const m = /^\{([\s\S]*)\}$/.exec(clause.trim());
+  if (!m) return null;
+  const parts = m[1]!.split(',').map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  return {
+    names: parts.map((x) => x.replace(/^type\s+/, '').split(/\s+as\s+/)[0]!.trim()),
+    allInlineTypes: parts.every((x) => /^type\s/.test(x)),
+  };
+}
+
+/** True when every name is exported from `src` as a `type` or `interface` (and never as a value). */
+export function exportsOnlyTypes(src: string, names: string[]): boolean {
+  if (names.length === 0) return false;
+  const masked = maskSource(src, { comments: true });
+  return names.every((n) => {
+    const id = n.replace(/[$]/g, '\\$&');
+    const asType = new RegExp(String.raw`\bexport\s+(?:declare\s+)?(?:type|interface)\s+${id}\b`).test(masked);
+    const asValue = new RegExp(String.raw`\bexport\s+(?:declare\s+)?(?:async\s+)?(?:const|let|var|function\*?|class|enum)\s+${id}\b`).test(masked);
+    return asType && !asValue;
+  });
+}
 
 /** Extract static imports / re-exports / dynamic imports / requires from JS/TS source. */
 export function parseImports(src: string): ImportRef[] {
@@ -28,7 +58,13 @@ export function parseImports(src: string): ImportRef[] {
       const at = m.index ?? 0;
       if (seen.has(at)) continue;
       seen.add(at);
-      refs.push({ specifier: m[3]!, line: idx.lineOf(at), typeOnly: Boolean(m[1]) });
+      const named = m[2] ? namedImports(m[2]) : null;
+      refs.push({
+        specifier: m[4]!,
+        line: idx.lineOf(at),
+        typeOnly: Boolean(m[1]) || Boolean(named?.allInlineTypes),
+        ...(named ? { names: named.names } : {}),
+      });
     }
   }
   return refs.sort((a, b) => a.line - b.line);
@@ -176,7 +212,10 @@ export function computeClientFiles(input: GraphInput): Map<string, string | null
     for (const ref of parseImports(src)) {
       if (ref.typeOnly) continue;
       const resolved = resolveImport(file, ref.specifier, input.aliases, isFile);
-      if (resolved && !parent.has(resolved)) queue.push([resolved, file]);
+      if (!resolved || parent.has(resolved)) continue;
+      // `import { SearchResult } from "@/app/api/search/route"`: only types cross the boundary, no code is bundled.
+      if (ref.names && exportsOnlyTypes(input.read(resolved), ref.names)) continue;
+      queue.push([resolved, file]);
     }
   }
   return parent;

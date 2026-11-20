@@ -50,7 +50,8 @@ export const FAKE = {
   aws: j('AK', 'IA', 'Z7DUMMY0TEST0KEY'),
   github: j('gh', 'p_', 'DUMMY0launch0check0test0key000000000'),
   google: j('AI', 'za', 'SyDUMMY-launch-check-test-key-00000'),
-  pem: j('-----BEGIN ', 'RSA PRIVATE KEY', '-----'),
+  pem: j('-----BEGIN ', 'RSA PRIVATE KEY', '-----', '\\n', 'MIIEDUMMY0launch0check0test0not0a0real0private0key0000000000', '\\n', '-----END ', 'RSA PRIVATE KEY', '-----'),
+  pemHeader: j('-----BEGIN ', 'PRIVATE KEY', '-----'),
   dbUrl: j('postgres', 'ql://app:', 'Xk29dLq7Zt', '@db.fakeproject.supabase.co:5432/postgres'),
   jwt(role: string): string {
     const b = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');

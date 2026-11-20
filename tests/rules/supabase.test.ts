@@ -153,8 +153,8 @@ describe('firebase/open-security-rules', () => {
     );
     expect(out.map((f) => [f.severity, f.file, f.line])).toEqual([
       ['critical', 'firestore.rules', 5],
-      ['high', 'database.rules.json', 1],
       ['high', 'firestore.rules', 8],
+      ['medium', 'database.rules.json', 1],
     ]);
   });
 
