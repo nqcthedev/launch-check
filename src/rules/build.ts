@@ -109,7 +109,7 @@ function runBuild(cmd: string, args: string[], cwd: string, timeoutMs: number): 
 }
 
 export const buildRule = defineRule({
-  id: 'build/failed',
+  id: 'build/production-build',
   title: 'Production build fails',
   category: 'build',
   severity: 'high',
@@ -126,7 +126,7 @@ export const buildRule = defineRule({
     const res = await runBuild(pm, ['run', 'build'], ctx.root, ctx.options.buildTimeoutMs ?? 10 * 60_000);
     const seconds = (res.ms / 1000).toFixed(1);
     if (res.code === 0) {
-      return [{ severity: 'info', title: `Build succeeded (${seconds}s)`, message: `\`${pm} run build\` (${script}) completed without errors.`, file: 'package.json' }];
+      return [{ severity: 'info', title: `Build succeeded (${seconds}s)`, message: `\`${pm} run build\` (${script}) completed without errors.`, file: 'package.json', fix: 'No action needed.' }];
     }
     const errors = parseBuildOutput(res.output, ctx.root);
     if (errors.length === 0) {

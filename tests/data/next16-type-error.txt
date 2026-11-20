@@ -1,0 +1,15 @@
+▲ Next.js 16.4.6 (Turbopack)
+✓ Running next.config.ts took 37ms
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 364ms
+  Running TypeScript ...
+app/dashboard/page.tsx(25,9): error TS2322: Type '{ id: any; title: any; done: any; }[] | 42' is not assignable to type 'Todo[]'.
+  Type 'number' is not assignable to type 'Todo[]'.
+Failed to type check.
+

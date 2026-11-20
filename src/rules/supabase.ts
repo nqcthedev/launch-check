@@ -142,16 +142,28 @@ export const permissivePolicyRule = defineRule({
     'Keep `true` only for SELECT on genuinely public data (e.g. published blog posts) and say so in a comment.',
   appliesTo: (ctx) => sqlFiles(ctx).length > 0,
   run(ctx) {
-    const out: FindingInput[] = [];
+    // Replay migrations in order so that a policy dropped by a later migration is not reported.
+    const live = new Map<string, FindingInput>();
+    const policyKey = (name: string, table: string) => `${table}::${name}`;
     for (const file of sqlFiles(ctx)) {
       const original = ctx.read(file);
       const sql = maskSqlComments(original);
       const idx = new LineIndex(original);
-      const re = new RegExp(String.raw`\bcreate\s+policy\s+("[^"]+"|[\w$]+)\s+on\s+${QUALIFIED}([^;]*)`, 'gi');
+      const re = new RegExp(
+        String.raw`\b(create|drop)\s+policy\s+(?:if\s+exists\s+)?("[^"]+"|[\w$]+)\s+on\s+${QUALIFIED}([^;]*)`,
+        'gi',
+      );
       for (const m of sql.matchAll(re)) {
-        const name = m[1]!.replace(/^"|"$/g, '');
-        const table = normalizeTable(m[2]!);
-        const rest = m[3]!;
+        const verb = m[1]!.toLowerCase();
+        const name = m[2]!.replace(/^"|"$/g, '');
+        const table = normalizeTable(m[3]!);
+        const key = policyKey(name, table.key);
+        if (verb === 'drop') {
+          live.delete(key);
+          continue;
+        }
+        live.delete(key);
+        const rest = m[4]!;
         const cmd = (/\bfor\s+(all|select|insert|update|delete)\b/i.exec(rest)?.[1] ?? 'all').toLowerCase();
         const roles = (/\bto\s+([\w\s,"]+?)(?=\s+(?:using|with)\b|$)/i.exec(rest)?.[1] ?? 'public')
           .split(',')
@@ -168,7 +180,7 @@ export const permissivePolicyRule = defineRule({
         const who = authOnly ? 'any signed-in user' : 'anyone with your public anon key';
         const action = isRead ? 'read every row of' : cmd === 'all' ? 'read, insert, update and delete every row of' : `${cmd} any row in`;
         const line = idx.lineOf(m.index ?? 0);
-        out.push({
+        live.set(key, {
           severity,
           title: `Policy "${name}" lets ${who} ${isRead ? 'read' : 'write'} "${table.table}"`,
           message: `Policy "${name}" on ${table.key} (FOR ${cmd.toUpperCase()}, TO ${roles.join(', ')}) uses \`true\`: ${who} can ${action} ${table.table}.`,
@@ -178,7 +190,7 @@ export const permissivePolicyRule = defineRule({
         });
       }
     }
-    return out;
+    return [...live.values()];
   },
 });
 
@@ -207,7 +219,7 @@ export const serviceRoleInClientRule = defineRule({
       if (!first) continue;
       const chain = ctx.clientChain(file);
       out.push({
-        title: `service_role key referenced in client module ${file}`,
+        title: 'Supabase service_role key used in browser code',
         message:
           `${file} is part of the browser bundle${chain.length > 1 ? ` (imported via ${chain.slice(1).join(' ← ')})` : ' (it is a client entry)'}` +
           `${refs[0] ? ` and reads ${refs[0].name}` : ' and references the service_role key'}.`,

@@ -3,8 +3,8 @@ import type { Finding, Severity } from './types.js';
 export const SEVERITY_WEIGHT: Record<Severity, number> = { critical: 20, high: 8, medium: 3, low: 1, info: 0 };
 
 /**
- * 100 minus weighted findings. Repeats of the same rule count half and are capped,
- * so one noisy rule cannot zero the score on its own.
+ * Weighted penalty mapped onto 0-100. Repeats of the same rule count half and are capped,
+ * so one noisy rule cannot dominate the score.
  */
 export function computeScore(findings: Finding[]): number {
   const byRule = new Map<string, Finding[]>();
@@ -20,7 +20,8 @@ export function computeScore(findings: Finding[]): number {
     const rest = weights.slice(1).reduce((s, w) => s + w / 2, 0);
     penalty += first + Math.min(rest, first * 1.5);
   }
-  return Math.max(0, Math.round(100 - penalty));
+  // Asymptotic: one medium costs ~7 points, one critical ~33; the score never hits 0 or goes negative.
+  return Math.round((100 * 40) / (40 + penalty));
 }
 
 export function gradeFor(score: number, findings: Finding[]): string {

@@ -167,7 +167,7 @@ export const debuggerRule = defineRule({
       if (!original.includes('debugger')) continue;
       const masked = maskSource(original, { comments: true, strings: true });
       for (const m of matchAll(original, masked, /(?<![\w$.])debugger(?![\w$])\s*;?/g)) {
-        out.push({ title: `debugger statement in ${p}`, message: `${p}:${m.line} contains a \`debugger\` statement.`, file: p, line: m.line, snippet: m.snippet });
+        out.push({ title: 'debugger statement left in code', message: `${p}:${m.line} contains a \`debugger\` statement.`, file: p, line: m.line, snippet: m.snippet });
       }
     }
     return out;
@@ -235,7 +235,7 @@ export const evalRule = defineRule({
       const re = /(?<![\w$.])eval\s*\(|\bnew\s+Function\s*\(|(?<![\w$.])(?:setTimeout|setInterval)\s*\(\s*['"`]/g;
       for (const m of matchAll(original, masked, re)) {
         const what = m.text.startsWith('eval') ? 'eval()' : m.text.startsWith('new') ? 'new Function()' : 'string-based timer';
-        out.push({ title: `${what} in ${p}`, message: `${p}:${m.line} executes a string as code with ${what}.`, file: p, line: m.line, snippet: m.snippet });
+        out.push({ title: `${what} executes a string as code`, message: `${p}:${m.line} uses ${what}.`, file: p, line: m.line, snippet: m.snippet });
       }
     }
     return out;
@@ -267,9 +267,10 @@ export const corsRule = defineRule({
       const creds = /access-control-allow-credentials['"]?\s*[,:=]\s*(?:value\s*:\s*)?['"]?true|\bcredentials\s*:\s*true\b/i.test(code);
       if (!creds) continue;
       const w = wildcard[0]!;
+      const how = /true/.test(w.text) || /headers/.test(w.text) ? 'reflects any request Origin' : 'allows any origin (`*`)';
       out.push({
-        title: `Permissive CORS with credentials in ${p}`,
-        message: `${p} allows any origin (\`${w.text.trim()}\`) and also allows credentials.`,
+        title: 'CORS allows any origin together with credentials',
+        message: `${p} ${how} and also sends Access-Control-Allow-Credentials: true.`,
         file: p,
         line: w.line,
         snippet: w.snippet,
@@ -298,7 +299,7 @@ export const rawSqlRule = defineRule({
       const re =
         /\$(?:queryRawUnsafe|executeRawUnsafe)\s*\(\s*(?:`[^`]*\$\{|['"][^'"]*['"]\s*\+)|\bsql\.raw\s*\(\s*`[^`]*\$\{|\.(?:query|execute)\s*\(\s*`\s*(?:SELECT|INSERT|UPDATE|DELETE|WITH)\b[^`]*\$\{|\.(?:query|execute)\s*\(\s*['"]\s*(?:SELECT|INSERT|UPDATE|DELETE)\b[^'"]*['"]\s*\+/gi;
       for (const m of matchAll(original, code, re)) {
-        out.push({ title: `Raw SQL with string interpolation in ${p}`, message: `${p}:${m.line} builds a SQL string from interpolated values.`, file: p, line: m.line, snippet: m.snippet });
+        out.push({ title: 'Raw SQL built with string interpolation', message: `${p}:${m.line} builds a SQL string from interpolated values.`, file: p, line: m.line, snippet: m.snippet });
       }
     }
     return out;

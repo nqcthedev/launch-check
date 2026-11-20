@@ -117,16 +117,16 @@ export const missingNotFoundRule = defineRule({
 
 /** Packages that must never be imported from browser code. */
 const SERVER_ONLY_PACKAGES: Array<{ re: RegExp; reason: string }> = [
-  { re: /^server-only$/, reason: 'is marked server-only' },
-  { re: /^(node:.*|fs|fs\/promises|child_process|net|tls|dgram|cluster|worker_threads|http2|zlib|v8|vm)$/, reason: 'is a Node.js built-in that does not exist in the browser' },
+  { re: /^server-only$/, reason: 'a module marked server-only' },
+  { re: /^(node:.*|fs|fs\/promises|child_process|net|tls|dgram|cluster|worker_threads|http2|zlib|v8|vm)$/, reason: 'a Node.js built-in that does not exist in the browser' },
   { re: /^next\/headers$/, reason: 'only works in server components and route handlers' },
-  { re: /^(@prisma\/client|prisma|pg|postgres|mysql2|mongodb|mongoose|ioredis|redis|better-sqlite3|@neondatabase\/serverless|@planetscale\/database)$/, reason: 'is a database driver: using it in the browser means shipping database credentials' },
-  { re: /^drizzle-orm\/(node-postgres|postgres-js|mysql2|neon-http|neon-serverless|better-sqlite3|libsql)$/, reason: 'is a database driver: using it in the browser means shipping database credentials' },
-  { re: /^(stripe)$/, reason: 'is the Stripe Node SDK, which requires your secret key (use @stripe/stripe-js in the browser)' },
-  { re: /^(firebase-admin|firebase-admin\/.*)$/, reason: 'is the Firebase Admin SDK, which requires a service account' },
-  { re: /^(nodemailer|resend|@sendgrid\/mail|postmark|twilio)$/, reason: 'is a server-side email/SMS SDK that requires an API key' },
-  { re: /^(jsonwebtoken|bcrypt)$/, reason: 'is a Node.js-only crypto library (signing secrets do not belong in the browser)' },
-  { re: /^(openai|@anthropic-ai\/sdk|groq-sdk|@google\/generative-ai|@google\/genai|@mistralai\/mistralai|replicate)$/, reason: 'is an LLM SDK: calling it from the browser requires shipping your API key' },
+  { re: /^(@prisma\/client|prisma|pg|postgres|mysql2|mongodb|mongoose|ioredis|redis|better-sqlite3|@neondatabase\/serverless|@planetscale\/database)$/, reason: 'a database driver; using it in the browser means shipping database credentials' },
+  { re: /^drizzle-orm\/(node-postgres|postgres-js|mysql2|neon-http|neon-serverless|better-sqlite3|libsql)$/, reason: 'a database driver; using it in the browser means shipping database credentials' },
+  { re: /^(stripe)$/, reason: 'the Stripe Node SDK, which needs your secret key; use @stripe/stripe-js in the browser' },
+  { re: /^(firebase-admin|firebase-admin\/.*)$/, reason: 'the Firebase Admin SDK, which needs a service account' },
+  { re: /^(nodemailer|resend|@sendgrid\/mail|postmark|twilio)$/, reason: 'a server-side email/SMS SDK that needs an API key' },
+  { re: /^(jsonwebtoken|bcrypt)$/, reason: 'a Node.js crypto library; signing secrets do not belong in the browser' },
+  { re: /^(openai|@anthropic-ai\/sdk|groq-sdk|@google\/generative-ai|@google\/genai|@mistralai\/mistralai|replicate)$/, reason: 'an LLM SDK; calling it from the browser means shipping your API key' },
 ];
 
 export const serverModuleInClientRule = defineRule({
@@ -161,7 +161,7 @@ export const serverModuleInClientRule = defineRule({
           severity: /built-in|only works/.test(hit.reason) ? 'medium' : 'high',
           title: `Client bundle imports "${spec}"`,
           message:
-            `${file} is browser code${chain.length > 1 ? ` (imported via ${chain.slice(1).join(' ← ')})` : ' ("use client")'} and imports "${spec}", which ${hit.reason}.` +
+            `${file} is browser code${chain.length > 1 ? ` (imported via ${chain.slice(1).join(' ← ')})` : ' ("use client")'} and imports "${spec}" (${hit.reason}).` +
             (allowBrowser ? ' The file also sets `dangerouslyAllowBrowser: true`.' : ''),
           file,
           line,
@@ -206,7 +206,7 @@ export const dangerousHtmlRule = defineRule({
         if (/^JSON\.stringify\(/.test(expr)) continue; // JSON-LD; see README limitations
         const line = idx.lineOf(m.index ?? 0);
         out.push({
-          title: `Unsanitized HTML rendered in ${file.path}`,
+          title: 'Unsanitized HTML passed to dangerouslySetInnerHTML',
           message: `dangerouslySetInnerHTML renders \`${expr.length > 60 ? `${expr.slice(0, 57)}...` : expr}\` without sanitization.`,
           file: file.path,
           line,
@@ -222,6 +222,26 @@ export const dangerousHtmlRule = defineRule({
 /* Unauthenticated route handlers / API routes / server actions (heuristic)                       */
 /* ---------------------------------------------------------------------------------------------- */
 
+/**
+ * Given structural (comment+string masked) source and the index of a function declaration / const arrow,
+ * return the [start, end] offsets of its body.
+ */
+export function functionBody(structural: string, at: number): [number, number] {
+  const paren = structural.indexOf('(', at);
+  if (paren === -1) return [at, structural.length];
+  const closeParen = matchBracket(structural, paren);
+  if (closeParen === -1) return [at, structural.length];
+  const brace = structural.indexOf('{', closeParen);
+  const arrow = structural.indexOf('=>', closeParen);
+  if (arrow !== -1 && (brace === -1 || arrow < brace) && !/^\s*\{/.test(structural.slice(arrow + 2))) {
+    const end = structural.indexOf('\n', arrow);
+    return [at, end === -1 ? structural.length : end];
+  }
+  if (brace === -1) return [at, structural.length];
+  const end = matchBracket(structural, brace);
+  return [at, end === -1 ? structural.length : end + 1];
+}
+
 export const AUTH_SIGNAL_RE =
   /\b(auth\s*\(\s*\)|getServerSession|getSession|getUser|getClaims|currentUser|requireAuth|requireUser|requireAdmin|requireSession|requireRole|withAuth|withApiAuthRequired|isAuthenticated|ensureAuth|checkAuth|verifyToken|verifyJwt|verifyIdToken|jwtVerify|jwt\.verify|validateRequest|getToken|getAuth|clerkClient|getKindeServerSession|auth\.protect|authorize|unauthori[sz]ed|forbidden)\b|\b(?:401|403)\b|['"]authorization['"]|headers\.authorization|x-api-key|CRON_SECRET|API_SECRET|ADMIN_TOKEN/i;
 
@@ -229,10 +249,10 @@ const SIGNATURE_SIGNAL_RE =
   /\b(constructEvent(Async)?|webhooks\.verify|verifySignature|verifyWebhook|validateWebhook|Webhook\s*\(|svix|timingSafeEqual|createHmac|stripe-signature|x-hub-signature|x-signature|svix-signature|webhook-signature|CRON_SECRET)\b/i;
 
 const DB_WRITE_RE =
-  /\.(delete|insert|update|upsert|remove|destroy|create|createMany|updateMany|deleteMany|executeRaw|\$executeRaw)\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
+  /\.(delete|insert|update|upsert|remove|destroy|updateMany|deleteMany|createMany|\$executeRaw|\$executeRawUnsafe)\s*\(|\b(prisma|db|tx)\.\w+\.create\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
 
 const PRIVILEGED_RE =
-  /\b(service_?role|SERVICE_?ROLE|supabaseAdmin|adminClient|createAdminClient|prisma\.|db\.|drizzle|firebase-admin|adminDb|stripe\.|openai\.|anthropic\.)/;
+  /\b(service_?role|SERVICE_?ROLE|supabaseAdmin|adminClient|createAdminClient|prisma|drizzle|firebase-admin|adminDb|stripe|openai|anthropic)\.\w+/;
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -300,18 +320,25 @@ export const unauthenticatedRouteRule = defineRule({
       const mutating = MUTATING_METHODS.has(exportName) || kind === 'action' || DB_WRITE_RE.test(body);
       const privileged = PRIVILEGED_RE.test(body);
       if (!mutating && !privileged) return;
-      if (kind !== 'action' && mw?.covers(url)) return;
+      // Middleware-only auth is fragile (matchers drift; CVE-2025-29927 bypassed it entirely): report it, but as low.
+      const onlyMiddleware = kind !== 'action' && mw?.covers(url) === true;
       const original = ctx.read(file);
       const idx = new LineIndex(original);
       const label =
         kind === 'action' ? `Server action ${exportName}()` : kind === 'api' ? `API route ${url}` : `Route handler ${exportName} ${url}`;
-      const does = DB_WRITE_RE.test(body) ? 'writes data' : privileged ? 'uses a privileged client' : 'accepts writes';
+      const priv = PRIVILEGED_RE.exec(body)?.[0];
+      const does = DB_WRITE_RE.test(body)
+        ? 'writes to the database'
+        : priv
+          ? `calls \`${priv}\` (a privileged or paid API)`
+          : `accepts ${kind === 'action' ? 'form submissions' : `${exportName} requests`}`;
       out.push({
-        severity: mutating ? 'high' : 'medium',
-        title: `${label} has no auth check`,
-        message:
-          `${label} ${does} but no authentication or authorization check was found in the handler` +
-          `${kind === 'action' ? ' (server actions are callable by anyone who can load the page)' : ''}.`,
+        severity: onlyMiddleware ? 'low' : mutating ? 'high' : 'medium',
+        title: onlyMiddleware ? `${label} relies on middleware for auth` : `${label} has no auth check`,
+        message: onlyMiddleware
+          ? `${label} ${does} and has no auth check of its own; it depends entirely on ${mw!.file}.`
+          : `${label} ${does} but no authentication or authorization check was found in the handler` +
+            `${kind === 'action' ? ' (server actions are callable by anyone who can load the page)' : ''}.`,
         file,
         line,
         snippet: snippetOf(idx.line(line)),
@@ -330,9 +357,8 @@ export const unauthenticatedRouteRule = defineRule({
         const url = routeUrl(p, appDir);
         for (const m of code.matchAll(/export\s+(?:async\s+)?(?:function\s+|const\s+)(GET|POST|PUT|PATCH|DELETE)\b/g)) {
           const at = m.index ?? 0;
-          const open = structural.indexOf('{', structural.indexOf(m[1]!, at));
-          const close = open === -1 ? -1 : matchBracket(structural, open);
-          const body = close === -1 ? code.slice(at) : code.slice(at, close + 1);
+          const [start, end] = functionBody(structural, at);
+          const body = code.slice(start, end);
           // Only the handler body counts: a helper such as requireUser() must actually be called by it.
           consider(p, url, 'route', m[1]!, idx.lineOf(at), body);
         }
@@ -343,9 +369,8 @@ export const unauthenticatedRouteRule = defineRule({
       } else if (hasDirective(original, 'use server')) {
         for (const m of code.matchAll(/export\s+(?:async\s+function\s+|const\s+)([\w$]+)/g)) {
           const at = m.index ?? 0;
-          const open = structural.indexOf('{', at);
-          const close = open === -1 ? -1 : matchBracket(structural, open);
-          const body = close === -1 ? code.slice(at) : code.slice(at, close + 1);
+          const [start, end] = functionBody(structural, at);
+          const body = code.slice(start, end);
           consider(p, '', 'action', m[1]!, idx.lineOf(at), body);
         }
       }
@@ -380,7 +405,7 @@ export const unverifiedWebhookRule = defineRule({
       const lineMatch = matchAll(original, code, /export\s+(?:async\s+)?(?:function|const)\s+POST\b|export\s+default\b|['"]checkout\.session\.completed['"]/g)[0];
       out.push({
         severity: stripeEvents ? 'critical' : 'high',
-        title: `Webhook ${f.path} trusts unsigned requests`,
+        title: 'Webhook trusts unsigned requests',
         message: `${f.path} handles webhook events${stripeEvents ? ' (Stripe payment events)' : ''} but never verifies the provider signature.`,
         file: f.path,
         ...(lineMatch ? { line: lineMatch.line, snippet: lineMatch.snippet } : {}),
