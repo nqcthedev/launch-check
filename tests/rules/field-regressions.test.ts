@@ -240,6 +240,7 @@ describe('security/unauthenticated-route: field regressions', () => {
         'app/api/chat/route.ts': `export async function POST(req: Request) {\n  const { messages } = await req.json();\n  return openai.chat.completions.create({ messages });\n}`,
         'app/api/render/route.ts': `export async function POST(req: Request) {\n  const body = await req.json();\n  return Response.json(await startRender(body));\n}`,
         'app/api/csp-report/route.ts': `export async function POST(req: Request) {\n  const raw = await req.text();\n  log(raw);\n  return new Response(null, { status: 204 });\n}`,
+        'app/actions/shadow.ts': `'use server';\nexport async function clearShadowSession() {\n  const cookieStore = await cookies();\n  cookieStore.delete({ name: 'shadow', path: '/' });\n  url.searchParams.delete('x');\n}`,
         'app/(auth)/forgot-password/actions.ts': `'use server';\nexport async function resetPasswordWithOtpAction(payload: { email: string; otp: string }) {\n  await supabaseAdmin.auth.admin.updateUserById(payload.email, {});\n}`,
       },
       'security/unauthenticated-route',

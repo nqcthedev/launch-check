@@ -311,8 +311,9 @@ const PUBLIC_AUTH_CALL_RE =
 const SIGNATURE_SIGNAL_RE =
   /\b(constructEvent(Async)?|webhooks\.verify|Webhook\s*\(|svix|timingSafeEqual|createHmac|hmac|CRON_SECRET)\b|[\w$]*verif[\w$]*\s*\(|[\w$]*signature[\w$]*\s*\(|\b\w*(?:WEBHOOK|SIGNING)_(?:SECRET|TOKEN|KEY)\b|secret[-_]token|['"`](?:x-)?[\w-]*(?:signature|hmac|webhook-secret)[\w-]*['"`]|stripe-signature/i;
 
+// `.delete(` / `.set(`-style calls on cookies, URL params, headers, Maps and caches are not database writes.
 const DB_WRITE_RE =
-  /\.(delete|insert|update|upsert|remove|destroy|updateMany|deleteMany|createMany|\$executeRaw|\$executeRawUnsafe)\s*\(|\b(prisma|db|tx)\.\w+\.create\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
+  /(?<!\b(?:cookieStore|cookies\(\)|cookies|searchParams|params|headers|formData|form|map|set|cache|store|timers?|listeners|controllers?|classList|localStorage|sessionStorage))\.(delete|insert|update|upsert|remove|destroy|updateMany|deleteMany|createMany|\$executeRaw|\$executeRawUnsafe)\s*\(|\b(prisma|db|tx)\.\w+\.create\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
 
 const PRIVILEGED_RE =
   /\b(service_?role|SERVICE_?ROLE|supabaseAdmin|adminClient|createAdminClient|prisma|drizzle|firebase-admin|adminDb|stripe|openai|anthropic)\.\w+/;
