@@ -165,7 +165,7 @@ export const missingMetadataRule = defineRule({
       const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim();
       const desc = /<meta\s+name=["']description["']/i.test(html);
       const missing: string[] = [];
-      if (!title || /^(Vite \+ React|Vite App|React App|Lovable App)$/i.test(title)) missing.push(title ? `placeholder title "${title}"` : '`<title>`');
+      if (!title || /^(Vite \+ React(?: \+ TS)?|Vite App|React App|Lovable App|Lovable Generated Project|Bolt App)$/i.test(title)) missing.push(title ? `placeholder title "${title}"` : '`<title>`');
       if (!desc) missing.push('`<meta name="description">`');
       if (missing.length > 0) return [{ title: 'index.html metadata incomplete', message: `index.html is missing ${missing.join(' and ')}.`, file: 'index.html' }];
     }

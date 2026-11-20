@@ -177,3 +177,27 @@ describe('config/env-example', () => {
     expect(await findings({ ...code, '.env.example': 'STRIPE_SECRET_KEY=\nRESEND_API_KEY=\n' }, 'config/env-example')).toEqual([]);
   });
 });
+
+describe('config/typescript-strict with project references', () => {
+  it('checks the referenced configs of a solution-style tsconfig (Vite template)', async () => {
+    const files = {
+      'package.json': { dependencies: { vite: '6.0.0', react: '19.0.0' } },
+      'tsconfig.json': '{ "files": [], "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }] }',
+      'tsconfig.app.json': '{ "compilerOptions": { "strict": true } }',
+      'tsconfig.node.json': '{ "compilerOptions": { "strict": false } }',
+    };
+    const out = await findings(files, 'config/typescript-strict');
+    expect(out.map((f) => f.file)).toEqual(['tsconfig.node.json']);
+  });
+});
+
+describe('config/typescript-strict and TypeScript 6 defaults', () => {
+  it('treats a missing "strict" as on for TypeScript >= 6, but still flags strict: false', async () => {
+    const ts7 = { 'package.json': { devDependencies: { typescript: '~7.0.2' } } };
+    expect(await findings({ ...ts7, 'tsconfig.json': '{ "compilerOptions": {} }' }, 'config/typescript-strict')).toEqual([]);
+    const off = await findings({ ...ts7, 'tsconfig.json': '{ "compilerOptions": { "strict": false } }' }, 'config/typescript-strict');
+    expect(off[0]!.title).toBe('tsconfig.json: "strict" is set to false');
+    const ts5 = await findings({ 'package.json': { devDependencies: { typescript: '^5.9.0' } }, 'tsconfig.json': '{}' }, 'config/typescript-strict');
+    expect(ts5[0]!.title).toContain('before 6.0');
+  });
+});

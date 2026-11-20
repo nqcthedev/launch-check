@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Detection, Framework, Integration, PackageJson } from './types.js';
 import { LOCKFILES, lockfileVersions } from './utils/lockfile.js';
 
-const TRACKED = ['next', 'react', 'react-dom', 'vite'] as const;
+const TRACKED = ['next', 'react', 'react-dom', 'vite', 'typescript'] as const;
 
 function allDeps(pkg: PackageJson | null): Record<string, string> {
   return { ...(pkg?.peerDependencies ?? {}), ...(pkg?.devDependencies ?? {}), ...(pkg?.dependencies ?? {}) };

@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import type { FindingInput, Location, ProjectContext } from '../types.js';
 import { LineIndex, lineCount, maskSource, parseJsonc, snippetOf } from '../utils/text.js';
+import { parseVersion } from '../utils/version.js';
 import { defineRule, envRefs, isConfigFile, isEnvTemplate, matchAll, parseDotenv, plural } from './helpers.js';
 
 interface TsConfig {
@@ -39,19 +40,32 @@ export const typescriptStrictRule = defineRule({
   fix: 'Set `"strict": true` in tsconfig.json and fix the errors (`npx tsc --noEmit`). Enable it file-by-file with `// @ts-check` if the backlog is large.',
   appliesTo: (ctx) => ctx.exists('tsconfig.json'),
   run(ctx) {
-    const options = resolveTsconfig(ctx, 'tsconfig.json');
-    if (options?.strict === true && options.noImplicitAny !== false && options.strictNullChecks !== false) return [];
-    const text = ctx.read('tsconfig.json');
-    const m = matchAll(text, text, /"(strict|noImplicitAny|strictNullChecks)"\s*:\s*false/g)[0];
-    const what = options?.strict === true ? `strict is on but ${options.noImplicitAny === false ? 'noImplicitAny' : 'strictNullChecks'} is disabled` : '"strict" is not enabled';
-    return [
-      {
-        title: `tsconfig.json: ${what}`,
-        message: `tsconfig.json: ${what}.`,
-        file: 'tsconfig.json',
-        ...(m ? { line: m.line, snippet: m.snippet } : {}),
-      },
-    ];
+    // Solution-style tsconfig (Vite templates): `files: []` + references. Check the referenced projects instead.
+    const root = parseJsonc<TsConfig & { files?: unknown[]; references?: Array<{ path: string }> }>(ctx.read('tsconfig.json'));
+    const targets =
+      root?.references && Array.isArray(root.files) && root.files.length === 0
+        ? root.references
+            .map((r) => posix.normalize(r.path.endsWith('.json') ? r.path : posix.join(r.path, 'tsconfig.json')))
+            .filter((p) => ctx.exists(p))
+        : ['tsconfig.json'];
+    // TypeScript 6+ enables `strict` by default; older versions default to non-strict.
+    const tsMajor = parseVersion(ctx.detection.resolved.typescript ?? ctx.detection.versions.typescript)?.major ?? 0;
+    const out: FindingInput[] = [];
+    for (const file of targets) {
+      const options = resolveTsconfig(ctx, file);
+      const strict = options?.strict ?? (tsMajor >= 6 ? true : undefined);
+      if (strict === true && options?.noImplicitAny !== false && options?.strictNullChecks !== false) continue;
+      const text = ctx.read(file);
+      const m = matchAll(text, text, /"(strict|noImplicitAny|strictNullChecks)"\s*:\s*false/g)[0];
+      const what =
+        strict === true
+          ? `strict is on but ${options?.noImplicitAny === false ? 'noImplicitAny' : 'strictNullChecks'} is disabled`
+          : options?.strict === false
+            ? '"strict" is set to false'
+            : '"strict" is not enabled (TypeScript before 6.0 defaults to non-strict)';
+      out.push({ title: `${file}: ${what}`, message: `${file}: ${what}.`, file, ...(m ? { line: m.line, snippet: m.snippet } : {}) });
+    }
+    return out;
   },
 });
 

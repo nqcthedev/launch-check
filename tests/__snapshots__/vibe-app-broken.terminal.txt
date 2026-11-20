@@ -288,10 +288,10 @@
              Fix  Create or update .env.example with every variable the code reads, using
                   placeholder values, and commit it.
 
-   MEDIUM    tsconfig.json: "strict" is not enabled  config/typescript-strict
+   MEDIUM    tsconfig.json: "strict" is set to false  config/typescript-strict
              tsconfig.json:7
              │ "strict": false,
-             tsconfig.json: "strict" is not enabled.
+             tsconfig.json: "strict" is set to false.
              Fix  Set `"strict": true` in tsconfig.json and fix the errors (`npx tsc --noEmit`).
                   Enable it file-by-file with `// @ts-check` if the backlog is large.
 

@@ -443,13 +443,13 @@ apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
 
 **How to fix:** Create or update .env.example with every variable the code reads, using placeholder values, and commit it.
 
-#### 27. tsconfig.json: "strict" is not enabled
+#### 27. tsconfig.json: "strict" is set to false
 
 **Severity:** Medium · **Category:** Configuration · **Check:** `config/typescript-strict`
 
 **Location:** `tsconfig.json:7`
 
-tsconfig.json: "strict" is not enabled.
+tsconfig.json: "strict" is set to false.
 
 ```json
 "strict": false,

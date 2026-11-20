@@ -90,9 +90,9 @@ export interface Detection {
   lockfile: string | null;
   typescript: boolean;
   /** Declared version ranges from package.json. */
-  versions: Partial<Record<'next' | 'react' | 'react-dom' | 'vite', string>>;
+  versions: Partial<Record<'next' | 'react' | 'react-dom' | 'vite' | 'typescript', string>>;
   /** Exact versions resolved from the lockfile or node_modules, when available. */
-  resolved: Partial<Record<'next' | 'react' | 'react-dom' | 'vite', string>>;
+  resolved: Partial<Record<'next' | 'react' | 'react-dom' | 'vite' | 'typescript', string>>;
   /** Directory that contains the Next.js `app` router, relative to root (e.g. "app" or "src/app"). */
   appDir: string | null;
   pagesDir: string | null;
