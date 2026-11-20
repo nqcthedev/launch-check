@@ -376,4 +376,4 @@ Project layout: `src/rules/*` (one module per area, each rule is `{ id, severity
 
 ---
 
-Built by Cuong Nguyen — full stack developer. Need your app fixed and deployed? Hire me on Fiverr: https://www.fiverr.com/cuongnqxx
+Built by NQC The Dev — full stack developer. Need your app fixed and deployed? Hire me on Fiverr: https://www.fiverr.com/cuongnqxx
