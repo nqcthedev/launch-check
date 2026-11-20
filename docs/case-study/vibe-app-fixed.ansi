@@ -1,0 +1,15 @@
+
+  [1m[35mlaunch-check[39m[22m [2mv0.1.0 · production-readiness audit[22m
+
+  [2mProject[22m  [1mtaskpilot[22m
+  [2mStack  [22m  Next.js 16.4.6 (App Router) · Supabase, Stripe, OpenAI
+  [2mScanned[22m  29 files · 35 checks · 0.5s
+
+  [2m╭──────────────────────────────────────────────────────────────────────────╮[22m
+  [2m│[22m [1mScore[22m  [32m[1m100/100[22m[39m   [1mGrade[22m [32m[1mA[22m[39m   [32mReady to launch[39m                               [2m│[22m
+  [2m│[22m [31m●[39m 0 critical  [33m●[39m 0 high  [34m●[39m 0 medium  [37m●[39m 0 low  [2m●[22m 0 info                    [2m│[22m
+  [2m╰──────────────────────────────────────────────────────────────────────────╯[22m
+
+  [32m✔[39m No issues found by 35 checks.
+
+[2m  ~heuristic = pattern-based check, verify manually. Add --md report.md for a shareable report, --verbose for "why it matters".[22m

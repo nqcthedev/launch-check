@@ -27,7 +27,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:update": "vitest run -u",
-    "dev": "node --import tsx src/cli.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "screenshots": "npm run build && node scripts/screenshot.mjs",
     "case-study": "npm run build && node scripts/case-study.mjs"
@@ -54,6 +53,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
+    "marked": "^18.2.1",
     "typescript": "~5.9.3",
     "vitest": "^3.2.7"
   }

@@ -1,0 +1,75 @@
+name: launch-check
+description: Production-readiness audit for AI-built Next.js, Vite and Node apps (secrets, Supabase RLS, unauthenticated routes, headers and more).
+author: Cuong Nguyen
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  path:
+    description: Project directory to scan.
+    default: .
+  fail-on:
+    description: Fail the step if any finding is at or above this severity (critical, high, medium, low, info, none).
+    default: high
+  report:
+    description: Where to write the Markdown report.
+    default: launch-check-report.md
+  audit:
+    description: Run npm/pnpm audit (needs network). "true" or "false".
+    default: 'true'
+  build:
+    description: Also run the project's build script (dependencies must be installed first). "true" or "false".
+    default: 'false'
+  args:
+    description: Extra CLI arguments, e.g. "--only secrets,supabase".
+    default: ''
+
+outputs:
+  score:
+    description: Score from 0 to 100.
+    value: ${{ steps.scan.outputs.score }}
+  grade:
+    description: Letter grade (A-F).
+    value: ${{ steps.scan.outputs.grade }}
+  report:
+    description: Path to the Markdown report.
+    value: ${{ inputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build launch-check
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        npm ci --no-audit --no-fund --loglevel=error
+        npm run build --silent
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        LC_PATH: ${{ inputs.path }}
+        LC_FAIL_ON: ${{ inputs.fail-on }}
+        LC_REPORT: ${{ inputs.report }}
+        LC_AUDIT: ${{ inputs.audit }}
+        LC_BUILD: ${{ inputs.build }}
+        LC_ARGS: ${{ inputs.args }}
+      run: |
+        flags=()
+        [ "$LC_AUDIT" = "false" ] && flags+=(--no-audit)
+        [ "$LC_BUILD" = "true" ] && flags+=(--build)
+        # shellcheck disable=SC2206
+        extra=($LC_ARGS)
+        cli="$GITHUB_ACTION_PATH/dist/cli.js"
+
+        node "$cli" "$LC_PATH" --json --fail-on none "${flags[@]}" "${extra[@]}" > "$RUNNER_TEMP/launch-check.json"
+        node -e 'const r=require(process.argv[1]); console.log(`score=${r.score}`); console.log(`grade=${r.grade}`);' "$RUNNER_TEMP/launch-check.json" >> "$GITHUB_OUTPUT"
+
+        set +e
+        node "$cli" "$LC_PATH" --color --md "$LC_REPORT" --fail-on "$LC_FAIL_ON" "${flags[@]}" "${extra[@]}"
+        code=$?
+        set -e
+        cat "$LC_REPORT" >> "$GITHUB_STEP_SUMMARY"
+        exit $code

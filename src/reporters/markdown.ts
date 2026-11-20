@@ -49,7 +49,7 @@ export function renderMarkdown(result: AuditResult, opts: MarkdownOptions = {}):
   const out: string[] = [];
   out.push(`# Production Readiness Report: ${result.project.name}`);
   out.push('');
-  out.push('| | |');
+  out.push(`| **Project** | ${esc(result.project.name)} |`);
   out.push('|---|---|');
   out.push(`| **Date** | ${date} |`);
   out.push(`| **Stack** | ${esc(describeStack(result.detection))} |`);

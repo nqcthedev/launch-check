@@ -1,0 +1,338 @@
+
+  [1m[35mlaunch-check[39m[22m [2mv0.1.0 · production-readiness audit[22m
+
+  [2mProject[22m  [1mtaskpilot[22m
+  [2mStack  [22m  Next.js 14.1.0 (App Router) · Supabase, Stripe, OpenAI
+  [2mScanned[22m  19 files · 34 checks · 0.1s
+
+  [2m╭──────────────────────────────────────────────────────────────────────────╮[22m
+  [2m│[22m [1mScore[22m  [31m[1m13/100[22m[39m   [1mGrade[22m [31m[1mF[22m[39m   [31mNot ready for production[39m                       [2m│[22m
+  [2m│[22m [31m●[39m 8 critical  [33m●[39m 12 high  [34m●[39m 8 medium  [37m●[39m 9 low  [2m●[22m 0 info                   [2m│[22m
+  [2m╰──────────────────────────────────────────────────────────────────────────╯[22m
+
+  [1m[4mSECRETS & CREDENTIALS[24m[22m [2m(5)[22m
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1m.env with live secrets is committed[22m  [2msecrets/env-file-committed[22m
+             [36m.env:4[39m
+             [2m│[22m [90mNEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********[39m
+             .env is tracked by git. It contains 3 secret-looking values:
+             NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY.
+             [32mFix [39m Add `.env*` (and `!.env.example`) to .gitignore, run `git rm --cached <file>`,
+                  rotate every secret that was in it, and keep only placeholder values in a
+                  committed .env.example.
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mStripe live secret key hard-coded in source[22m  [2msecrets/hardcoded-key[22m
+             [36mlib/stripe.ts:3[39m
+             [2m│[22m [90mexport const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(…[39m
+             Found Stripe live secret key (sk_live_******…(49 chars)) in a file that is bundled into
+             the browser JavaScript. Clerk secret keys share this prefix.
+             [32mFix [39m Rotate the key in the provider dashboard first (assume it is compromised), then
+                  move it to an environment variable that is only read on the server (Vercel/Netlify
+                  project settings, or a gitignored .env.local), and purge it from git history if
+                  the repo was ever public.
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mNEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY is shipped to the[22m  [2msecrets/public-env-secret[22m
+             [1mbrowser[22m
+             [36m.env:4[39m
+             [2m│[22m [90mNEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY=********[39m
+             NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY uses a public prefix, so its value is embedded in
+             the client bundle (and the value is a Supabase service_role key). Seen 2 times.
+             [32mFix [39m Remove the public prefix, read the variable only in server code (route handler,
+                  server action, edge function), and call that from the browser. Rotate the key: it
+                  has already been shipped to browsers.
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mNEXT_PUBLIC_OPENAI_API_KEY is shipped to the browser[22m  [2msecrets/public-env-secret[22m
+             [36m.env:5[39m
+             [2m│[22m [90mNEXT_PUBLIC_OPENAI_API_KEY=********[39m
+             NEXT_PUBLIC_OPENAI_API_KEY uses a public prefix, so its value is embedded in the client
+             bundle (and the value is an OpenAI API key). Seen 2 times.
+             [32mFix [39m Remove the public prefix, read the variable only in server code (route handler,
+                  server action, edge function), and call that from the browser. Rotate the key: it
+                  has already been shipped to browsers.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mSTRIPE_SECRET_KEY read in client code[22m  [2msecrets/server-env-in-client[22m
+             [36mlib/stripe.ts:3[39m
+             [2m│[22m [90mexport const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_live_******…(…[39m
+             lib/stripe.ts is bundled to the browser (imported via components/UpgradeButton.tsx),
+             but reads STRIPE_SECRET_KEY, which is only available on the server.
+             [32mFix [39m Move the code that needs the secret to the server (route handler, server action,
+                  Supabase edge function) and call it from the client with fetch or a server action.
+
+  [1m[4mSUPABASE[24m[22m [2m(3)[22m
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mTable "todos" has Row Level Security disabled[22m  [2msupabase/rls-disabled[22m
+             [36msupabase/migrations/20240115120000_init.sql:17[39m
+             [2m│[22m [90mcreate table public.todos ([39m
+             public.todos is created without `enable row level security` in any migration; the table
+             is readable and writable with the public anon key.
+             [32mFix [39m Add `alter table <name> enable row level security;` in a new migration, then write
+                  policies scoped to the owner, e.g. `create policy "own rows" on <name> for all
+                  using (auth.uid() = user_id) with check (auth.uid() = user_id);`.
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mSupabase service_role key used in browser code[22m  [2msupabase/service-role-in-client[22m
+             [36mlib/supabase.ts:5[39m
+             [2m│[22m [90mconst supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!;[39m
+             lib/supabase.ts is part of the browser bundle (imported via app/dashboard/page.tsx) and
+             reads NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY.
+             [32mFix [39m Create the admin client in a server-only module (`import "server-only"` at the top
+                  of lib/supabase/admin.ts) and use it exclusively from route handlers / server
+                  actions after checking the user. In the browser use the anon key with RLS
+                  policies.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mPolicy "Enable all access for all users" lets anyone with[22m  [2msupabase/permissive-policy[22m
+             [1myour public anon key write "notes"[22m
+             [36msupabase/migrations/20240115120000_init.sql:35[39m
+             [2m│[22m [90mcreate policy "Enable all access for all users"[39m
+             Policy "Enable all access for all users" on public.notes (FOR ALL, TO public) uses
+             `true`: anyone with your public anon key can read, insert, update and delete every row
+             of notes.
+             [32mFix [39m Scope the policy to the row owner, e.g. `using (auth.uid() = user_id)` and `with
+                  check (auth.uid() = user_id)`. Keep `true` only for SELECT on genuinely public
+                  data (e.g. published blog posts) and say so in a comment.
+
+  [1m[4mAPPLICATION SECURITY[24m[22m [2m(11)[22m
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mWebhook trusts unsigned requests[22m  [2msecurity/unverified-webhook[22m[2m ~heuristic[22m
+             [36mapp/api/webhooks/stripe/route.ts:4[39m
+             [2m│[22m [90mexport async function POST(req: Request) {[39m
+             app/api/webhooks/stripe/route.ts handles webhook events (Stripe payment events) but
+             never verifies the provider signature.
+             [32mFix [39m Verify the signature with the raw body before parsing: for Stripe,
+                  `stripe.webhooks.constructEvent(await req.text(),
+                  req.headers.get("stripe-signature"), process.env.STRIPE_WEBHOOK_SECRET)`. For
+                  other providers use their SDK verifier (svix, @octokit/webhooks) or an HMAC with
+                  timingSafeEqual.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mCORS allows any origin together with credentials[22m  [2msecurity/cors-wildcard-credentials[22m
+             [36mapp/api/chat/route.ts:5[39m
+             [2m│[22m [90m'Access-Control-Allow-Origin': '*',[39m
+             app/api/chat/route.ts allows any origin (`*`) and also sends
+             Access-Control-Allow-Credentials: true.
+             [32mFix [39m Allow an explicit list of origins (`origin: ["https://app.example.com"]`) when
+                  credentials are needed, or drop credentials for public APIs.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mUnsanitized HTML passed to[22m  [2msecurity/dangerously-set-inner-html[22m
+             [1mdangerouslySetInnerHTML[22m
+             [36mapp/dashboard/page.tsx:59[39m
+             [2m│[22m [90m<div key={note.id} dangerouslySetInnerHTML={{ __html: note.content }} />[39m
+             dangerouslySetInnerHTML renders `note.content` without sanitization.
+             [32mFix [39m Render as text instead, or sanitize first: `dangerouslySetInnerHTML={{ __html:
+                  DOMPurify.sanitize(html) }}` (isomorphic-dompurify on the server). For Markdown
+                  use react-markdown without rehype-raw.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1meval() executes a string as code[22m  [2msecurity/eval[22m
+             [36mlib/ai-parse.ts:6[39m
+             [2m│[22m [90mreturn eval('(' + match[0] + ')');[39m
+             lib/ai-parse.ts:6 uses eval().
+             [32mFix [39m Use `JSON.parse` for data (validate it with zod), a lookup table for dynamic
+                  dispatch, or a sandboxed expression parser (e.g. expr-eval) for formulas.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mClient bundle imports "openai"[22m  [2msecurity/server-module-in-client[22m
+             [36mlib/openai.ts:1[39m
+             [2m│[22m [90mimport OpenAI from 'openai';[39m
+             lib/openai.ts is browser code (imported via components/ChatAssistant.tsx) and imports
+             "openai" (an LLM SDK; calling it from the browser means shipping your API key). The
+             file also sets `dangerouslyAllowBrowser: true`.
+             [32mFix [39m Keep server SDKs in modules that start with `import "server-only"` and expose what
+                  the UI needs through a route handler or server action. In the browser use the
+                  public SDKs (@stripe/stripe-js, Supabase anon client).
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mClient bundle imports "stripe"[22m  [2msecurity/server-module-in-client[22m
+             [36mlib/stripe.ts:1[39m
+             [2m│[22m [90mimport Stripe from 'stripe';[39m
+             lib/stripe.ts is browser code (imported via components/UpgradeButton.tsx) and imports
+             "stripe" (the Stripe Node SDK, which needs your secret key; use @stripe/stripe-js in
+             the browser).
+             [32mFix [39m Keep server SDKs in modules that start with `import "server-only"` and expose what
+                  the UI needs through a route handler or server action. In the browser use the
+                  public SDKs (@stripe/stripe-js, Supabase anon client).
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mRoute handler POST /api/chat has no auth check[22m  [2msecurity/unauthenticated-route[22m[2m ~heuristic[22m
+             [36mapp/api/chat/route.ts:14[39m
+             [2m│[22m [90mexport async function POST(req: Request) {[39m
+             Route handler POST /api/chat calls `openai.chat` (a privileged or paid API) but no
+             authentication or authorization check was found in the handler.
+             [32mFix [39m At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mRoute handler DELETE /api/todos/[id] has no auth[22m  [2msecurity/unauthenticated-route[22m[2m ~heuristic[22m
+             [1mcheck[22m
+             [36mapp/api/todos/[id]/route.ts:5[39m
+             [2m│[22m [90mexport async function DELETE(req: Request, { params }: { params: { id: string } }) {[39m
+             Route handler DELETE /api/todos/[id] writes to the database but no authentication or
+             authorization check was found in the handler.
+             [32mFix [39m At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mServer action updateProfile() has no auth check[22m  [2msecurity/unauthenticated-route[22m[2m ~heuristic[22m
+             [36mapp/dashboard/actions.ts:5[39m
+             [2m│[22m [90mexport async function updateProfile(formData: FormData) {[39m
+             Server action updateProfile() writes to the database but no authentication or
+             authorization check was found in the handler (server actions are callable by anyone who
+             can load the page).
+             [32mFix [39m At the top of the handler, resolve the user (e.g. `const { data: { user } } =
+                  await supabase.auth.getUser()`, `await auth()`) and return 401 if missing; then
+                  authorize the specific resource (does this user own row X?). Do not rely on
+                  middleware alone.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1mNo Content-Security-Policy header[22m  [2msecurity/missing-csp[22m
+             [36mnext.config.js[39m
+             No Content-Security-Policy is set in the framework config, middleware, hosting config
+             or HTML.
+             [32mFix [39m Start with a report-only policy and tighten it: `Content-Security-Policy:
+                  default-src 'self'; img-src 'self' data: https:; connect-src 'self'
+                  https://<project>.supabase.co; frame-ancestors 'none'`. For Next.js with inline
+                  scripts, use the nonce-based middleware pattern from the Next.js CSP guide.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1m5 of 5 recommended security headers missing[22m  [2msecurity/missing-security-headers[22m
+             [36mnext.config.js[39m
+             No configuration sets: Strict-Transport-Security (forces HTTPS); X-Frame-Options /
+             frame-ancestors (prevents clickjacking); X-Content-Type-Options (stops MIME sniffing);
+             Referrer-Policy (limits URL leakage to third parties); Permissions-Policy (disables
+             unused browser features).
+             [32mFix [39m Add an `async headers()` block to next.config (or `headers` in vercel.json /
+                  `_headers` on Netlify / `helmet()` in Express) that sets
+                  Strict-Transport-Security, X-Frame-Options: DENY, X-Content-Type-Options: nosniff,
+                  Referrer-Policy: strict-origin-when-cross-origin and Permissions-Policy.
+
+  [1m[4mNEXT.JS[24m[22m [2m(5)[22m
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mTypeScript errors are ignored during `next build`[22m  [2mnextjs/build-checks-disabled[22m
+             [36mnext.config.js:8[39m
+             [2m│[22m [90mignoreBuildErrors: true,[39m
+             next.config.js sets typescript.ignoreBuildErrors: true, so type errors never block a
+             deploy.
+             [32mFix [39m Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the
+                  reported errors (run `npx tsc --noEmit`).
+
+  [40m[37m LOW      [39m[49m [1mESLint is skipped during `next build`[22m  [2mnextjs/build-checks-disabled[22m
+             [36mnext.config.js:11[39m
+             [2m│[22m [90mignoreDuringBuilds: true,[39m
+             next.config.js sets eslint.ignoreDuringBuilds: true. Make sure lint runs in CI instead.
+             [32mFix [39m Remove `typescript.ignoreBuildErrors` / `eslint.ignoreDuringBuilds` and fix the
+                  reported errors (run `npx tsc --noEmit`).
+
+  [40m[37m LOW      [39m[49m [1mnext/image optimization is turned off[22m  [2mnextjs/images-unoptimized[22m
+             [36mnext.config.js:4[39m
+             [2m│[22m [90munoptimized: true,[39m
+             next.config.js sets images.unoptimized: true for a server-rendered app.
+             [32mFix [39m Remove `unoptimized: true` and configure `images.remotePatterns` for external
+                  hosts. Keep it only with `output: "export"`.
+
+  [40m[37m LOW      [39m[49m [1mApp Router has no error.tsx[22m  [2mnextjs/missing-error-boundary[22m
+             [36mapp[39m
+             No error.tsx or global-error.tsx under app/.
+             [32mFix [39m Add app/error.tsx (a "use client" component with a reset button) and
+                  app/global-error.tsx for errors in the root layout.
+
+  [40m[37m LOW      [39m[49m [1mApp Router has no not-found.tsx[22m  [2mnextjs/missing-not-found[22m
+             [36mapp[39m
+             No app/not-found.tsx.
+             [32mFix [39m Add app/not-found.tsx (App Router) or pages/404.tsx (Pages Router) with a link
+                  home.
+
+  [1m[4mDEPENDENCIES[24m[22m [2m(5)[22m
+
+  [1m[41m[37m CRITICAL [39m[49m[22m [1mnext 14.1.0 allows bypassing middleware.ts[22m  [2mdependencies/next-middleware-bypass[22m
+             [36mpackage.json:13[39m
+             [2m│[22m [90m"next": "14.1.0",[39m
+             next 14.1.0 is affected by CVE-2025-29927 (fixed in 14.2.25) and the project uses
+             middleware.ts, which performs auth checks.
+             [32mFix [39m Upgrade Next.js to 12.3.5, 13.5.9, 14.2.25, 15.2.3 or later, and re-check auth
+                  inside pages/route handlers instead of relying on middleware alone.
+
+  [1m[43m[30m HIGH     [39m[49m[22m [1mreact "^18.2.0" and react-dom "latest" do not[22m  [2mdependencies/react-version-mismatch[22m
+             [1mmatch[22m
+             [36mpackage.json:16[39m
+             [2m│[22m [90m"react-dom": "latest",[39m
+             package.json declares react@"^18.2.0" but react-dom@"latest"; they can resolve to
+             different versions.
+             [32mFix [39m Install matching versions (`npm install react@X react-dom@X`), then `npm dedupe`
+                  and check `npm ls react`.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1mNo lockfile[22m  [2mdependencies/missing-lockfile[22m
+             [36mpackage.json[39m
+             package.json declares dependencies but no package-lock.json, pnpm-lock.yaml, yarn.lock
+             or bun.lock is present.
+             [32mFix [39m Run your package manager once (`npm install`, `pnpm install`) and commit the
+                  generated lockfile; use `npm ci` / `pnpm install --frozen-lockfile` in CI and
+                  deploys.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1mnext 14.1.0 is 2 major versions behind[22m  [2mdependencies/outdated-framework[22m
+             [36mpackage.json:13[39m
+             [2m│[22m [90m"next": "14.1.0",[39m
+             next 14.1.0 is in use; the current major is 16.
+             [32mFix [39m Upgrade one major at a time with the official codemods (`npx @next/codemod@latest
+                  upgrade`), running the build and tests between steps.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1m1 dependency not pinned[22m  [2mdependencies/unpinned-version[22m
+             [36mpackage.json:16[39m
+             [2m│[22m [90m"react-dom": "latest",[39m
+             react-dom@"latest".
+             [32mFix [39m Pin to a caret range of the version you tested (`npm install next@15.5.4` writes
+                  "^15.5.4").
+
+  [1m[4mCONFIGURATION[24m[22m [2m(5)[22m
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1mNo .env.example[22m  [2mconfig/env-example[22m
+             [36mlib/openai.ts:4[39m
+             [2m│[22m [90mapiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,[39m
+             The code reads 4 environment variables (NEXT_PUBLIC_OPENAI_API_KEY, STRIPE_SECRET_KEY,
+             NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY) but there is no
+             .env.example documenting them.
+             [32mFix [39m Create or update .env.example with every variable the code reads, using
+                  placeholder values, and commit it.
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1mtsconfig.json: "strict" is set to false[22m  [2mconfig/typescript-strict[22m
+             [36mtsconfig.json:7[39m
+             [2m│[22m [90m"strict": false,[39m
+             tsconfig.json: "strict" is set to false.
+             [32mFix [39m Set `"strict": true` in tsconfig.json and fix the errors (`npx tsc --noEmit`).
+                  Enable it file-by-file with `// @ts-check` if the backlog is large.
+
+  [40m[37m LOW      [39m[49m [1mRoot layout exports no metadata[22m  [2mseo/missing-metadata[22m
+             [36mapp/layout.tsx[39m
+             app/layout.tsx exports neither `metadata` nor `generateMetadata`.
+             [32mFix [39m Export `metadata` (title template, description, openGraph) from the root layout,
+                  or add `<title>` and `<meta name="description">` to index.html.
+
+  [40m[37m LOW      [39m[49m [1mNo robots.txt[22m  [2mseo/missing-robots[22m
+             Neither public/robots.txt nor an app/robots route exists.
+             [32mFix [39m Add app/robots.ts (Next.js) or public/robots.txt that disallows private paths and
+                  links the sitemap.
+
+  [40m[37m LOW      [39m[49m [1mNo sitemap[22m  [2mseo/missing-sitemap[22m
+             No sitemap.xml or app/sitemap route was found.
+             [32mFix [39m Add app/sitemap.ts (Next.js) or generate public/sitemap.xml at build time (e.g.
+                  vite-plugin-sitemap, next-sitemap).
+
+  [1m[4mCODE QUALITY[24m[22m [2m(3)[22m
+
+  [1m[44m[37m MEDIUM   [39m[49m[22m [1m8 explicit `any`s (30.4 per 1,000 lines)[22m  [2mcode-quality/any-density[22m
+             [36mapp/dashboard/actions.ts:7[39m[2m (+7 more)[22m
+             [2m│[22m [90mconst updates: any = Object.fromEntries(formData.entries());[39m
+             8 uses of `any` across 4 files; most in app/dashboard/page.tsx (4),
+             components/ChatAssistant.tsx (2), app/dashboard/actions.ts (1).
+             [32mFix [39m Replace `any` with real types or `unknown` + narrowing; generate database types
+                  (`supabase gen types typescript`, Prisma client) instead of `any` rows.
+
+  [40m[37m LOW      [39m[49m [1m3 console.log calls left in source[22m  [2mcode-quality/console-log[22m
+             [36mapp/dashboard/page.tsx:21[39m[2m (+2 more)[22m
+             [2m│[22m [90mconsole.log('loaded data', todoData, noteData);[39m
+             3 debug logs in 2 files (3 in browser code); most in app/dashboard/page.tsx (2),
+             components/ChatAssistant.tsx (1).
+             [32mFix [39m Remove debug logs, or use a logger with levels (pino, consola) and strip
+                  `console.log` in production builds (`compiler.removeConsole` in next.config).
+
+  [40m[37m LOW      [39m[49m [1m2 TODO/FIXME markers, 2 security-related[22m  [2mcode-quality/todo-comments[22m
+             [36mapp/api/todos/[id]/route.ts:4[39m[2m (+1 more)[22m
+             [2m│[22m [90m// TODO: add auth check before launch[39m
+             2 markers (0 FIXME/HACK/XXX). Security-related: app/api/todos/[id]/route.ts:4,
+             app/dashboard/actions.ts:8.
+             [32mFix [39m Review each marker; implement or track it in your issue tracker, then delete it.
+
+[2m  ~heuristic = pattern-based check, verify manually. Add --md report.md for a shareable report, --verbose for "why it matters".[22m

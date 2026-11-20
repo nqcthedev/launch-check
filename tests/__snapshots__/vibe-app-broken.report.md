@@ -1,6 +1,6 @@
 # Production Readiness Report: taskpilot
 
-| | |
+| **Project** | taskpilot |
 |---|---|
 | **Date** | 2026-01-15 |
 | **Stack** | Next.js 14.1.0 (App Router) · Supabase, Stripe, OpenAI |

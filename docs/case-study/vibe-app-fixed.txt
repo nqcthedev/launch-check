@@ -1,0 +1,15 @@
+
+  launch-check v0.1.0 · production-readiness audit
+
+  Project  taskpilot
+  Stack    Next.js 16.4.6 (App Router) · Supabase, Stripe, OpenAI
+  Scanned  29 files · 35 checks · 0.5s
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ Score  100/100   Grade A   Ready to launch                               │
+  │ ● 0 critical  ● 0 high  ● 0 medium  ● 0 low  ● 0 info                    │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  ✔ No issues found by 35 checks.
+
+  ~heuristic = pattern-based check, verify manually. Add --md report.md for a shareable report, --verbose for "why it matters".
