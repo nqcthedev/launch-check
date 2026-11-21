@@ -163,6 +163,36 @@ describe('security/unauthenticated-route (heuristic)', () => {
     );
     expect(out.map((f) => [f.severity, f.title])).toEqual([['low', 'Route handler POST /api/todos relies on middleware for auth']]);
   });
+
+  it('flags raw SQL writes through a synchronous driver (no await, lowercase SQL)', async () => {
+    const out = await findings(
+      {
+        ...base,
+        'app/api/todos/route.ts': [
+          `import { db } from '@/lib/db';`,
+          `export async function GET(req: Request) {`,
+          `  const userId = Number(new URL(req.url).searchParams.get('userId'));`,
+          `  return Response.json(db.prepare('select id, title from todos where user_id = ?').all(userId));`,
+          `}`,
+          `export async function DELETE(req: Request) {`,
+          `  const id = Number(new URL(req.url).searchParams.get('id'));`,
+          `  db.prepare('delete from todos where id = ?').run(id);`,
+          `  return Response.json({ deleted: id });`,
+          `}`,
+        ].join('\n'),
+      },
+      'security/unauthenticated-route',
+    );
+    expect(out.map((f) => [f.severity, f.title])).toEqual([['high', 'Route handler DELETE /api/todos has no auth check']]);
+  });
+
+  it('still skips handlers that neither await nor touch a database', async () => {
+    const out = await findings(
+      { ...base, 'app/api/echo/route.ts': `export async function POST(req: Request) { return Response.json({ ok: true, note: 'update your settings' }); }` },
+      'security/unauthenticated-route',
+    );
+    expect(out).toEqual([]);
+  });
 });
 
 describe('security/unverified-webhook (heuristic)', () => {

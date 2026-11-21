@@ -315,6 +315,11 @@ const SIGNATURE_SIGNAL_RE =
 const DB_WRITE_RE =
   /(?<!\b(?:cookieStore|cookies\(\)|cookies|searchParams|params|headers|formData|form|map|set|cache|store|timers?|listeners|controllers?|classList|localStorage|sessionStorage))\.(delete|insert|update|upsert|remove|destroy|updateMany|deleteMany|createMany|\$executeRaw|\$executeRawUnsafe)\s*\(|\b(prisma|db|tx)\.\w+\.create\s*\(|\b(INSERT\s+INTO|DELETE\s+FROM|UPDATE\s+\w+\s+SET)\b/;
 
+// Raw SQL writes inside a string literal, in any letter case: db.prepare('delete from todos where id = ?').
+const SQL_WRITE_RE = /['"`][^'"`]*\b(?:insert\s+into|delete\s+from|update\s+[\w."]+\s+set)\b/i;
+// Synchronous database drivers (better-sqlite3, node:sqlite, bun:sqlite) read and write without `await`.
+const SYNC_DB_RE = /\.prepare\s*\([^)]*\)\s*\.(?:run|get|all|iterate)\s*\(|\b(?:db|database|sqlite)\.exec\s*\(/;
+
 const PRIVILEGED_RE =
   /\b(service_?role|SERVICE_?ROLE|supabaseAdmin|adminClient|createAdminClient|prisma|drizzle|firebase-admin|adminDb|stripe|openai|anthropic)\.\w+/;
 
@@ -392,13 +397,14 @@ export const unauthenticatedRouteRule = defineRule({
       if (PUBLIC_AUTH_URL_RE.test(kind === 'action' ? `/${file.replace(/\/[^/]+$/, '').replace(/\([^)]+\)\//g, '')}/` : url)) return;
       // `export async function POST(req) { return GET(req) }`: the other handler decides, and it is judged on its own.
       if (/\breturn\s+(?:await\s+)?(?:GET|POST|PUT|PATCH|DELETE)\s*\(/.test(body)) return;
+      const writes = DB_WRITE_RE.test(body) || SQL_WRITE_RE.test(body);
       // Nothing awaited means nothing was read or written: a stub or a static response.
-      if (kind === 'route' && !/\bawait\b|\.then\s*\(/.test(body)) return;
+      // Synchronous drivers are the exception: they hit the database without `await`.
+      if (kind === 'route' && !/\bawait\b|\.then\s*\(/.test(body) && !writes && !SYNC_DB_RE.test(body)) return;
       if (PUBLIC_AUTH_CALL_RE.test(body)) return;
       const privileged = PRIVILEGED_RE.test(body);
       // Every export of a "use server" file is an endpoint, but one that neither writes nor touches a privileged
       // client (a formatter, a read through the caller's own RLS-bound client) is not worth a finding.
-      const writes = DB_WRITE_RE.test(body);
       const mutating = kind === 'action' ? writes : MUTATING_METHODS.has(exportName) || writes;
       if (!mutating && !privileged) return;
       // Browsers and beacons post to these without credentials by design.
@@ -410,7 +416,7 @@ export const unauthenticatedRouteRule = defineRule({
       const label =
         kind === 'action' ? `Server action ${exportName}()` : kind === 'api' ? `API route ${url}` : `Route handler ${exportName} ${url}`;
       const priv = PRIVILEGED_RE.exec(body)?.[0];
-      const does = DB_WRITE_RE.test(body)
+      const does = writes
         ? 'writes to the database'
         : priv
           ? `calls \`${priv}\` (a privileged or paid API)`
